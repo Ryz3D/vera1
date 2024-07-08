@@ -7,8 +7,9 @@
 
 #include "sd.h"
 
-int32_t adc_file_num = 0;
-TCHAR adc_file_path[32];
+int32_t file_num = 0;
+TCHAR a_file_path[32];
+TCHAR p_file_path[32];
 
 HAL_StatusTypeDef sd_touch_file(TCHAR *path)
 {
@@ -17,12 +18,14 @@ HAL_StatusTypeDef sd_touch_file(TCHAR *path)
 		return HAL_ERROR;
 	}
 	f_close(&SDFile);
+
 	return HAL_OK;
 }
 
-void sd_update_adc_file_path()
+void sd_update_file_paths()
 {
-	sprintf(adc_file_path, "ADC_%li.TXT", adc_file_num);
+	sprintf(a_file_path, A_FILE_FORMAT, file_num);
+	sprintf(p_file_path, P_FILE_FORMAT, file_num);
 }
 
 HAL_StatusTypeDef sd_init(uint8_t do_format)
@@ -41,7 +44,7 @@ HAL_StatusTypeDef sd_init(uint8_t do_format)
 		uint8_t rtext[_MAX_SS];
 		if (f_mkfs((TCHAR const*)SDPath, FM_ANY, 0, rtext, sizeof(rtext)) != FR_OK)
 		{
-			printf("ERROR: sd_init: Failed to create FAT volume\r\n");
+			printf("ERROR: sd_init: Failed to create FAT volume (did you generate code?)\r\n");
 			return HAL_ERROR;
 		}
 	}
@@ -49,11 +52,11 @@ HAL_StatusTypeDef sd_init(uint8_t do_format)
 	DIR dir_root;
 	if (f_opendir(&dir_root, "") != FR_OK)
 	{
-		printf("sd_init: Root dir open failed\r\n");
+		printf("sd_init: Root dir open failed (did you generate code?)\r\n");
 		return HAL_ERROR;
 	}
 	FILINFO file_info;
-	adc_file_num = -1;
+	file_num = -1;
 	while (f_readdir(&dir_root, &file_info) == FR_OK)
 	{
 		if (file_info.fname[0] == '\0')
@@ -62,25 +65,25 @@ HAL_StatusTypeDef sd_init(uint8_t do_format)
 		}
 		if (!(file_info.fattrib & AM_DIR))
 		{
-			int32_t file_num = -1;
-			sscanf(file_info.fname, "ADC_%li.TXT", &file_num);
-			if (file_num > adc_file_num)
+			int32_t test_num = -1;
+			sscanf(file_info.fname, A_FILE_FORMAT, &test_num);
+			if (test_num > file_num)
 			{
-				adc_file_num = file_num;
+				file_num = test_num;
 			}
 		}
 	}
 	f_closedir(&dir_root);
-	adc_file_num++;
-	sd_update_adc_file_path();
-	printf("sd_init: First file '%s'\r\n", adc_file_path);
+	file_num++;
+	sd_update_file_paths();
+	printf("sd_init: First files '%s' / '%s'\r\n", a_file_path, p_file_path);
 
 	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
 	HAL_Delay(2000);
 	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
 	HAL_Delay(250);
 
-	for (int32_t i = 0; i < adc_file_num; i++)
+	for (int32_t i = 0; i < file_num; i++)
 	{
 		HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
 		HAL_Delay(250);
@@ -88,14 +91,18 @@ HAL_StatusTypeDef sd_init(uint8_t do_format)
 		HAL_Delay(250);
 	}
 
-	if (sd_touch_file(adc_file_path) != FR_OK)
+	if (sd_touch_file(a_file_path) != HAL_OK)
 	{
-		printf("sd_init: ADC file touch failed\r\n");
+		printf("sd_init: Accel. file touch failed\r\n");
+		return HAL_ERROR;
+	}
+	if (sd_touch_file(p_file_path) != HAL_OK)
+	{
+		printf("sd_init: Pos. file touch failed\r\n");
 		return HAL_ERROR;
 	}
 
 	printf("sd_init: Initialized successfully\r\n");
-
 	return HAL_OK;
 }
 
@@ -145,18 +152,20 @@ HAL_StatusTypeDef sd_test()
 	return HAL_OK;
 }
 
-HAL_StatusTypeDef sd_log_adc(uint16_t *adc_buffer, uint32_t adc_buffer_len)
-{
-	// TODO: copy buffer to second buffer
+struct p_data_point data_buffer_2[5096];
 
-	if (f_open(&SDFile, adc_file_path, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
+HAL_StatusTypeDef sd_log_a_data(struct a_data_point *a_data_buffer, uint32_t a_data_len)
+{
+	memcpy((void*)data_buffer_2, (void*)a_data_buffer, a_data_len * sizeof(struct a_data_point));
+
+	if (f_open(&SDFile, a_file_path, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
 	{
-		printf("ADC file open failed\r\n");
+		printf("Accel. file open failed\r\n");
 		return HAL_ERROR;
 	}
 
-	char file_buffer[64];
 	/*
+	 char file_buffer[64];
 	 // ASCII write
 	 for (uint32_t i = 0; i < sizeof(adc_buffer) / sizeof(uint16_t); i++)
 	 {
@@ -173,26 +182,27 @@ HAL_StatusTypeDef sd_log_adc(uint16_t *adc_buffer, uint32_t adc_buffer_len)
 	 */
 
 	// timestamp
-	sprintf(file_buffer, "\r\nTIMESTAMP %lu\r\n", HAL_GetTick());
-	uint32_t bytes_written;
-	FRESULT res = f_write(&SDFile, file_buffer, strlen(file_buffer), (void*)&bytes_written);
-	if ((bytes_written == 0) || (res != FR_OK))
+	uint8_t timestamp_buffer[24] = { 'T', 'I', 'M', 'E', 'S', 'T', 'A', 'M', 'P', ' ' };
+	uint32_t ticks = HAL_GetTick();
+	memcpy((void*)timestamp_buffer + 10, (void*)&ticks, sizeof(uint32_t));
+	UINT bytes_written;
+	FRESULT res = f_write(&SDFile, timestamp_buffer, sizeof(timestamp_buffer), (void*)&bytes_written);
+	if ((bytes_written != sizeof(timestamp_buffer)) || (res != FR_OK))
 	{
-		printf("ADC file timestamp write failed\r\n");
+		printf("Accel. file timestamp write failed\r\n");
 		f_close(&SDFile);
 		return HAL_ERROR;
 	}
 
 	// binary write
-	res = f_write(&SDFile, adc_buffer, adc_buffer_len, (void*)&bytes_written);
-	if ((bytes_written != adc_buffer_len) || (res != FR_OK))
+	res = f_write(&SDFile, (void*)data_buffer_2, a_data_len * sizeof(struct a_data_point), &bytes_written);
+	if ((bytes_written != a_data_len * sizeof(struct a_data_point)) || (res != FR_OK))
 	{
-		printf("ADC file binary write failed (%lu / %lu bytes)\r\n", bytes_written, adc_buffer_len);
+		printf("Accel. file binary write failed (%hu / %lu bytes)\r\n", bytes_written, a_data_len * sizeof(struct a_data_point));
 		f_close(&SDFile);
 		return HAL_ERROR;
 	}
 
 	f_close(&SDFile);
-
 	return HAL_OK;
 }

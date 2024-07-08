@@ -34,7 +34,8 @@ extern "C" {
 #include <stdio.h>
 #include <string.h>
 
-#include "adxl357.h"
+#include "adxl.h"
+#include "data_points.h"
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -44,7 +45,7 @@ extern "C" {
 
 /* Exported constants --------------------------------------------------------*/
 /* USER CODE BEGIN EC */
-
+extern ADC_HandleTypeDef hadc1;
 /* USER CODE END EC */
 
 /* Exported macro ------------------------------------------------------------*/
@@ -56,7 +57,7 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-
+void Timer2_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/

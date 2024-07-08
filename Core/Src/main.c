@@ -27,12 +27,23 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 
+#define A_DATA_WRITE_INC \
+	if (a_data_buffer[a_data_write_index].complete >= 0b111) \
+	{ \
+		a_data_write_index++; \
+		a_data_buffer[a_data_write_index].complete = 0; \
+	}
+
+#define A_DATA_BUFFER_LEN 4096
+#define P_DATA_BUFFER_LEN 4096
+
+#define DO_FORMAT 1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -42,7 +53,6 @@
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
-DMA_HandleTypeDef hdma_adc1;
 
 SD_HandleTypeDef hsd1;
 DMA_HandleTypeDef hdma_sdmmc1_rx;
@@ -56,8 +66,11 @@ UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
 uint8_t capture_running = 1;
-uint8_t adc_data_ready = 0;
-uint16_t adc_buffer[4096];
+struct a_data_point a_data_buffer_1[A_DATA_BUFFER_LEN], a_data_buffer_2[A_DATA_BUFFER_LEN];
+struct p_data_point p_data_buffer_1[P_DATA_BUFFER_LEN], p_data_buffer_2[P_DATA_BUFFER_LEN];
+uint32_t a_data_write_index = 0;
+uint32_t p_data_write_index = 0;
+uint8_t a_data_locked = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -70,12 +83,10 @@ static void MX_SPI1_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
-#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
 /* USER CODE END 0 */
 
 /**
@@ -123,17 +134,19 @@ int main(void)
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 
-	if (sd_init(0) != HAL_OK)
+	if (sd_init(DO_FORMAT) != HAL_OK)
 	{
 		Error_Handler();
 	}
 
 	// ADC
-	if (HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, sizeof(adc_buffer) / sizeof(uint16_t)) != HAL_OK)
-	{
-		printf("HAL_ADC_Start_DMA failed\r\n");
-		Error_Handler();
-	}
+	/*
+	 if (HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, sizeof(adc_buffer) / sizeof(uint16_t)) != HAL_OK)
+	 {
+	 printf("HAL_ADC_Start_DMA failed\r\n");
+	 Error_Handler();
+	 }
+	 */
 
 	// 4 kHz Timer
 	if (HAL_TIM_Base_Start_IT(&htim2) != HAL_OK)
@@ -141,6 +154,8 @@ int main(void)
 		printf("HAL_TIM_Base_Start_IT failed\r\n");
 		Error_Handler();
 	}
+
+	a_data_buffer[0].complete = 0;
 
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 	printf("(%lu) Capture started\r\n", HAL_GetTick());
@@ -153,20 +168,27 @@ int main(void)
 		/* USER CODE END WHILE */
 
 		/* USER CODE BEGIN 3 */
-		if (adc_data_ready)
+		if (a_data_write_index >= A_DATA_BUFFER_SAVE_LEN)
 		{
-			if (adc_data_ready > 1)
+			// TODO: toggle pin
+			if (a_data_write_index > A_DATA_BUFFER_VALID_LEN)
 			{
-				printf("WARNING: DMA overflow (%u)!\r\n", adc_data_ready);
+				printf("WARNING: Accel. data overflow (%lu / %i)!\r\n", a_data_write_index, A_DATA_BUFFER_VALID_LEN);
 			}
-			adc_data_ready = 0;
-
-			if (sd_log_adc(adc_buffer, sizeof(adc_buffer) / sizeof(uint16_t)) != HAL_OK)
+			if (a_data_write_index != A_DATA_BUFFER_SAVE_LEN)
+			{
+				printf("(%lu) a_data: %lu\r\n", HAL_GetTick(), a_data_write_index);
+			}
+			// TODO: a_data_buffer mutex oder FIFO, dekker-algorithmus
+			// TODO: double buffer (zwei flags: buffer1_full, buffer1_empty)
+			if (sd_log_a_data(a_data_buffer, a_data_write_index - 1, &a_data_locked) != HAL_OK)
 			{
 				Error_Handler();
 			}
+			a_data_write_index = 0;
 		}
-		if (HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin))
+
+		if (HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin) == GPIO_PIN_SET)
 		{
 			capture_running = 0;
 			break;
@@ -214,15 +236,22 @@ void SystemClock_Config(void)
 		Error_Handler();
 	}
 
+	/** Activate the Over-Drive mode
+	 */
+	if (HAL_PWREx_EnableOverDrive() != HAL_OK)
+	{
+		Error_Handler();
+	}
+
 	/** Initializes the CPU, AHB and APB buses clocks
 	 */
 	RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
 	RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-	RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV8;
+	RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
 	RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
 	RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-	if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+	if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
 	{
 		Error_Handler();
 	}
@@ -249,16 +278,16 @@ static void MX_ADC1_Init(void)
 	/** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
 	 */
 	hadc1.Instance = ADC1;
-	hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV8;
+	hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
 	hadc1.Init.Resolution = ADC_RESOLUTION_12B;
 	hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
-	hadc1.Init.ContinuousConvMode = ENABLE;
+	hadc1.Init.ContinuousConvMode = DISABLE;
 	hadc1.Init.DiscontinuousConvMode = DISABLE;
 	hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
 	hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
 	hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
 	hadc1.Init.NbrOfConversion = 1;
-	hadc1.Init.DMAContinuousRequests = ENABLE;
+	hadc1.Init.DMAContinuousRequests = DISABLE;
 	hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
 	if (HAL_ADC_Init(&hadc1) != HAL_OK)
 	{
@@ -438,9 +467,6 @@ static void MX_DMA_Init(void)
 	__HAL_RCC_DMA2_CLK_ENABLE();
 
 	/* DMA interrupt init */
-	/* DMA2_Stream0_IRQn interrupt configuration */
-	HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
-	HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
 	/* DMA2_Stream3_IRQn interrupt configuration */
 	HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 0, 0);
 	HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
@@ -572,14 +598,45 @@ PUTCHAR_PROTOTYPE
 	return ch;
 }
 
+void Timer2_Handler(void)
+{
+	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
+
+	if (HAL_ADC_Start_IT(&hadc1) != HAL_OK)
+	{
+		Error_Handler();
+	}
+
+	// ~9µs for ADC Poll and GetValue
+	// HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
+	// uint32_t adc_val = HAL_ADC_GetValue(&hadc1);
+
+	// TODO: GPS request, ADXL sync
+
+	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
+}
+
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 {
-	if (capture_running)
+	if (capture_running && a_data_locked == 0 && a_data_write_index < A_DATA_BUFFER_SAVE_LEN)
 	{
-		adc_data_ready++;
-		// HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
-		// HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
+		if (hadc->Instance == ADC1)
+		{
+			// TODO: unsigned/signed?
+			a_data_buffer[a_data_write_index].a_piezo1 = HAL_ADC_GetValue(hadc);
+			a_data_buffer[a_data_write_index].x_mems1 = a_data_write_index;
+			a_data_buffer[a_data_write_index].complete |= A_COMPLETE_PZ1 | A_COMPLETE_PZ2 | A_COMPLETE_MEMS;
+			A_DATA_WRITE_INC
+		}
+		else if (hadc->Instance == ADC2)
+		{
+			a_data_buffer[a_data_write_index].a_piezo2 = HAL_ADC_GetValue(hadc);
+			a_data_buffer[a_data_write_index].complete |= A_COMPLETE_PZ2;
+			A_DATA_WRITE_INC
+		}
 	}
+	// HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
+	// HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
 }
 /* USER CODE END 4 */
 
