@@ -33,17 +33,20 @@
 /* USER CODE BEGIN PD */
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 
-#define A_DATA_WRITE_INC \
-	if (a_data_buffer[a_data_write_index].complete >= 0b111) \
-	{ \
-		a_data_write_index++; \
-		a_data_buffer[a_data_write_index].complete = 0; \
-	}
+#define BUFFER_FLAG_BUFFER_1_FULL (1 << 0)
+#define BUFFER_FLAG_BUFFER_1_EMPTIED (1 << 1)
+#define BUFFER_FLAG_BUFFER_2_FULL (1 << 2)
+#define BUFFER_FLAG_BUFFER_2_EMPTIED (1 << 3)
 
-#define A_DATA_BUFFER_LEN 4096
-#define P_DATA_BUFFER_LEN 4096
+#define A_BUFFER_LEN 4096
+#define P_BUFFER_LEN 128
 
 #define DO_FORMAT 1
+
+#define DEBUG1_A_BUFFER_1_SD 0
+#define DEBUG2_A_BUFFER_2_SD 0
+#define DEBUG1_ADC1_CONV 1
+#define DEBUG2_ADC2_CONV 1
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -53,6 +56,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
+ADC_HandleTypeDef hadc2;
 
 SD_HandleTypeDef hsd1;
 DMA_HandleTypeDef hdma_sdmmc1_rx;
@@ -66,11 +70,17 @@ UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
 uint8_t capture_running = 1;
-struct a_data_point a_data_buffer_1[A_DATA_BUFFER_LEN], a_data_buffer_2[A_DATA_BUFFER_LEN];
-struct p_data_point p_data_buffer_1[P_DATA_BUFFER_LEN], p_data_buffer_2[P_DATA_BUFFER_LEN];
-uint32_t a_data_write_index = 0;
-uint32_t p_data_write_index = 0;
-uint8_t a_data_locked = 0;
+
+a_data_point_t a_buffer_1[A_BUFFER_LEN];
+a_data_point_t a_buffer_2[A_BUFFER_LEN];
+p_data_point_t p_buffer_1[P_BUFFER_LEN];
+p_data_point_t p_buffer_2[P_BUFFER_LEN];
+uint8_t a_buffer_flags = BUFFER_FLAG_BUFFER_2_EMPTIED;
+uint8_t p_buffer_flags = BUFFER_FLAG_BUFFER_2_EMPTIED;
+uint32_t a_write_index = 0;
+uint32_t p_write_index = 0;
+
+uint32_t test = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -82,7 +92,10 @@ static void MX_SDMMC1_SD_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_TIM2_Init(void);
+static void MX_ADC2_Init(void);
 /* USER CODE BEGIN PFP */
+void a_buffer_write_inc(void);
+void p_buffer_write_inc(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -125,6 +138,7 @@ int main(void)
 	MX_FATFS_Init();
 	MX_USART3_UART_Init();
 	MX_TIM2_Init();
+	MX_ADC2_Init();
 	/* USER CODE BEGIN 2 */
 	HAL_Delay(1);
 
@@ -134,28 +148,32 @@ int main(void)
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 
+	a_buffer_1[0].complete = 0;
+	p_buffer_1[0].complete = 0;
+
 	if (sd_init(DO_FORMAT) != HAL_OK)
 	{
 		Error_Handler();
 	}
 
 	// ADC
-	/*
-	 if (HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc_buffer, sizeof(adc_buffer) / sizeof(uint16_t)) != HAL_OK)
-	 {
-	 printf("HAL_ADC_Start_DMA failed\r\n");
-	 Error_Handler();
-	 }
-	 */
+	if (HAL_ADC_Start_IT(&hadc1) != HAL_OK)
+	{
+		printf("ADC1 HAL_ADC_Start_IT failed\r\n");
+		Error_Handler();
+	}
+	if (HAL_ADC_Start_IT(&hadc2) != HAL_OK)
+	{
+		printf("ADC2 HAL_ADC_Start_IT failed\r\n");
+		Error_Handler();
+	}
 
-	// 4 kHz Timer
+	// Data capture timer
 	if (HAL_TIM_Base_Start_IT(&htim2) != HAL_OK)
 	{
 		printf("HAL_TIM_Base_Start_IT failed\r\n");
 		Error_Handler();
 	}
-
-	a_data_buffer[0].complete = 0;
 
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 	printf("(%lu) Capture started\r\n", HAL_GetTick());
@@ -168,24 +186,73 @@ int main(void)
 		/* USER CODE END WHILE */
 
 		/* USER CODE BEGIN 3 */
-		if (a_data_write_index >= A_DATA_BUFFER_SAVE_LEN)
+		/*
+		 uint8_t buffer_1_full = a_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL;
+		 uint8_t buffer_1_emptied = a_buffer_flags & BUFFER_FLAG_BUFFER_1_EMPTIED;
+		 if (buffer_1_full != 0 && buffer_1_emptied == 0)
+		 */
+		// If a_buffer_1 is full and has not been saved
+		if ((a_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL) && !(a_buffer_flags & BUFFER_FLAG_BUFFER_1_EMPTIED))
 		{
-			// TODO: toggle pin
-			if (a_data_write_index > A_DATA_BUFFER_VALID_LEN)
-			{
-				printf("WARNING: Accel. data overflow (%lu / %i)!\r\n", a_data_write_index, A_DATA_BUFFER_VALID_LEN);
-			}
-			if (a_data_write_index != A_DATA_BUFFER_SAVE_LEN)
-			{
-				printf("(%lu) a_data: %lu\r\n", HAL_GetTick(), a_data_write_index);
-			}
-			// TODO: a_data_buffer mutex oder FIFO, dekker-algorithmus
-			// TODO: double buffer (zwei flags: buffer1_full, buffer1_empty)
-			if (sd_log_a_data(a_data_buffer, a_data_write_index - 1, &a_data_locked) != HAL_OK)
+#if DEBUG1_A_BUFFER_1_SD
+			HAL_GPIO_TogglePin(Debug1_GPIO_Port, Debug1_Pin);
+#endif
+			if (sd_log_a_data(a_buffer_1, sizeof(a_buffer_1)) != HAL_OK)
 			{
 				Error_Handler();
 			}
-			a_data_write_index = 0;
+			a_buffer_flags |= BUFFER_FLAG_BUFFER_1_EMPTIED;
+#if DEBUG1_A_BUFFER_1_SD
+			HAL_GPIO_TogglePin(Debug1_GPIO_Port, Debug1_Pin);
+#endif
+		}
+		// If a_buffer_2 is full and has not been saved
+		if ((a_buffer_flags & BUFFER_FLAG_BUFFER_2_FULL) && !(a_buffer_flags & BUFFER_FLAG_BUFFER_2_EMPTIED))
+		{
+#if DEBUG2_A_BUFFER_2_SD
+			HAL_GPIO_TogglePin(Debug2_GPIO_Port, Debug2_Pin);
+#endif
+			if (sd_log_a_data(a_buffer_2, sizeof(a_buffer_2)) != HAL_OK)
+			{
+				Error_Handler();
+			}
+			a_buffer_flags |= BUFFER_FLAG_BUFFER_2_EMPTIED;
+#if DEBUG2_A_BUFFER_2_SD
+			HAL_GPIO_TogglePin(Debug2_GPIO_Port, Debug2_Pin);
+#endif
+		}
+
+		// If p_buffer_1 is full and has not been saved
+		if ((p_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL) && !(p_buffer_flags & BUFFER_FLAG_BUFFER_1_EMPTIED))
+		{
+#if DEBUG1_P_BUFFER_1_SD
+			HAL_GPIO_TogglePin(Debug1_GPIO_Port, Debug1_Pin);
+#endif
+			if (sd_log_p_data(p_buffer_1, sizeof(p_buffer_1)) != HAL_OK)
+			{
+				Error_Handler();
+			}
+			printf("p_buffer_1\r\n");
+			p_buffer_flags |= BUFFER_FLAG_BUFFER_1_EMPTIED;
+#if DEBUG1_P_BUFFER_1_SD
+			HAL_GPIO_TogglePin(Debug1_GPIO_Port, Debug1_Pin);
+#endif
+		}
+		// If p_buffer_2 is full and has not been saved
+		if ((p_buffer_flags & BUFFER_FLAG_BUFFER_2_FULL) && !(p_buffer_flags & BUFFER_FLAG_BUFFER_2_EMPTIED))
+		{
+#if DEBUG2_P_BUFFER_2_SD
+			HAL_GPIO_TogglePin(Debug2_GPIO_Port, Debug2_Pin);
+#endif
+			if (sd_log_p_data(p_buffer_2, sizeof(p_buffer_2)) != HAL_OK)
+			{
+				Error_Handler();
+			}
+			printf("p_buffer_2\r\n");
+			p_buffer_flags |= BUFFER_FLAG_BUFFER_2_EMPTIED;
+#if DEBUG2_P_BUFFER_2_SD
+			HAL_GPIO_TogglePin(Debug2_GPIO_Port, Debug2_Pin);
+#endif
 		}
 
 		if (HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin) == GPIO_PIN_SET)
@@ -283,12 +350,12 @@ static void MX_ADC1_Init(void)
 	hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
 	hadc1.Init.ContinuousConvMode = DISABLE;
 	hadc1.Init.DiscontinuousConvMode = DISABLE;
-	hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
-	hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+	hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
+	hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T2_TRGO;
 	hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
 	hadc1.Init.NbrOfConversion = 1;
 	hadc1.Init.DMAContinuousRequests = DISABLE;
-	hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+	hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
 	if (HAL_ADC_Init(&hadc1) != HAL_OK)
 	{
 		Error_Handler();
@@ -306,6 +373,58 @@ static void MX_ADC1_Init(void)
 	/* USER CODE BEGIN ADC1_Init 2 */
 
 	/* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+ * @brief ADC2 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_ADC2_Init(void)
+{
+
+	/* USER CODE BEGIN ADC2_Init 0 */
+
+	/* USER CODE END ADC2_Init 0 */
+
+	ADC_ChannelConfTypeDef sConfig = { 0 };
+
+	/* USER CODE BEGIN ADC2_Init 1 */
+
+	/* USER CODE END ADC2_Init 1 */
+
+	/** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
+	 */
+	hadc2.Instance = ADC2;
+	hadc2.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
+	hadc2.Init.Resolution = ADC_RESOLUTION_12B;
+	hadc2.Init.ScanConvMode = ADC_SCAN_DISABLE;
+	hadc2.Init.ContinuousConvMode = DISABLE;
+	hadc2.Init.DiscontinuousConvMode = DISABLE;
+	hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
+	hadc2.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T2_TRGO;
+	hadc2.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+	hadc2.Init.NbrOfConversion = 1;
+	hadc2.Init.DMAContinuousRequests = DISABLE;
+	hadc2.Init.EOCSelection = ADC_EOC_SEQ_CONV;
+	if (HAL_ADC_Init(&hadc2) != HAL_OK)
+	{
+		Error_Handler();
+	}
+
+	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+	 */
+	sConfig.Channel = ADC_CHANNEL_12;
+	sConfig.Rank = ADC_REGULAR_RANK_1;
+	sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+	if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	/* USER CODE BEGIN ADC2_Init 2 */
+
+	/* USER CODE END ADC2_Init 2 */
 
 }
 
@@ -398,7 +517,7 @@ static void MX_TIM2_Init(void)
 	htim2.Instance = TIM2;
 	htim2.Init.Prescaler = 0;
 	htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-	htim2.Init.Period = 3000;
+	htim2.Init.Period = 24000;
 	htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
 	htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
 	if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -410,7 +529,7 @@ static void MX_TIM2_Init(void)
 	{
 		Error_Handler();
 	}
-	sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+	sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
 	sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
 	if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
 	{
@@ -492,11 +611,19 @@ static void MX_GPIO_Init(void)
 	__HAL_RCC_GPIOH_CLK_ENABLE();
 	__HAL_RCC_GPIOA_CLK_ENABLE();
 	__HAL_RCC_GPIOB_CLK_ENABLE();
+	__HAL_RCC_GPIOF_CLK_ENABLE();
+	__HAL_RCC_GPIOE_CLK_ENABLE();
 	__HAL_RCC_GPIOD_CLK_ENABLE();
 	__HAL_RCC_GPIOG_CLK_ENABLE();
 
 	/*Configure GPIO pin Output Level */
 	HAL_GPIO_WritePin(GPIOB, LD1_Pin | LD3_Pin | LD2_Pin, GPIO_PIN_RESET);
+
+	/*Configure GPIO pin Output Level */
+	HAL_GPIO_WritePin(Debug2_GPIO_Port, Debug2_Pin, GPIO_PIN_RESET);
+
+	/*Configure GPIO pin Output Level */
+	HAL_GPIO_WritePin(Debug1_GPIO_Port, Debug1_Pin, GPIO_PIN_RESET);
 
 	/*Configure GPIO pin Output Level */
 	HAL_GPIO_WritePin(USB_PowerSwitchOn_GPIO_Port, USB_PowerSwitchOn_Pin, GPIO_PIN_RESET);
@@ -529,6 +656,20 @@ static void MX_GPIO_Init(void)
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+	/*Configure GPIO pin : Debug2_Pin */
+	GPIO_InitStruct.Pin = Debug2_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
+	HAL_GPIO_Init(Debug2_GPIO_Port, &GPIO_InitStruct);
+
+	/*Configure GPIO pin : Debug1_Pin */
+	GPIO_InitStruct.Pin = Debug1_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
+	HAL_GPIO_Init(Debug1_GPIO_Port, &GPIO_InitStruct);
 
 	/*Configure GPIO pin : RMII_TXD1_Pin */
 	GPIO_InitStruct.Pin = RMII_TXD1_Pin;
@@ -598,45 +739,147 @@ PUTCHAR_PROTOTYPE
 	return ch;
 }
 
+void switch_double_buffers(uint8_t *buffer_flags)
+{
+	// If buffer_2 has been filled
+	if (*buffer_flags & BUFFER_FLAG_BUFFER_1_FULL)
+	{
+		// If buffer_1 has been emptied
+		if (*buffer_flags & BUFFER_FLAG_BUFFER_1_EMPTIED)
+		{
+			// buffer_2 full
+			*buffer_flags |= BUFFER_FLAG_BUFFER_2_FULL;
+			// Reset buffer_1 to use
+			*buffer_flags &= ~BUFFER_FLAG_BUFFER_1_FULL & ~BUFFER_FLAG_BUFFER_1_EMPTIED;
+		}
+		else
+		{
+			printf("(%lu) WARNING: buffer_2 overflowing! (Flags in %p)\r\n", HAL_GetTick(), buffer_flags);
+		}
+	}
+	// If buffer_1 has been filled
+	else
+	{
+		// If buffer_2 has been emptied
+		if (*buffer_flags & BUFFER_FLAG_BUFFER_2_EMPTIED)
+		{
+			// buffer_1 full
+			*buffer_flags |= BUFFER_FLAG_BUFFER_1_FULL;
+			// Reset buffer_2 to use
+			*buffer_flags &= ~BUFFER_FLAG_BUFFER_2_FULL & ~BUFFER_FLAG_BUFFER_2_EMPTIED;
+		}
+		else
+		{
+			printf("(%lu) WARNING: buffer_1 overflowing! (Flags in %p)\r\n", HAL_GetTick(), buffer_flags);
+		}
+	}
+}
+
+void a_buffer_write_inc()
+{
+	a_data_point_t *a_buffer_current = (a_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL) ? a_buffer_2 : a_buffer_1;
+
+	// If data of current datapoint is complete
+	if (a_buffer_current[a_write_index].complete >= 0b111)
+	{
+		// Set timestamp to time of completion
+		a_buffer_current[a_write_index].timestamp = HAL_GetTick();
+		a_buffer_current[a_write_index].x_mems1 = a_write_index;
+
+		// If next index would overflow
+		if (++a_write_index >= A_BUFFER_LEN)
+		{
+			// Switch buffers
+			a_write_index = 0;
+			switch_double_buffers(&a_buffer_flags);
+		}
+
+		a_buffer_current = (a_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL) ? a_buffer_2 : a_buffer_1;
+		a_buffer_current[a_write_index].complete = 0;
+	}
+}
+
+void p_buffer_write_inc()
+{
+	p_data_point_t *p_buffer_current = (p_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL) ? p_buffer_2 : p_buffer_1;
+
+	// If data of current data point is complete
+	if (p_buffer_current[p_write_index].complete >= 0b1)
+	{
+		// Set timestamp to time of completion
+		p_buffer_current[p_write_index].timestamp = HAL_GetTick();
+		p_buffer_current[p_write_index].height = p_write_index;
+
+		// If next index would overflow
+		if (++p_write_index >= P_BUFFER_LEN)
+		{
+			// Switch buffers
+			p_write_index = 0;
+			switch_double_buffers(&p_buffer_flags);
+		}
+
+		p_buffer_current = (p_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL) ? p_buffer_2 : p_buffer_1;
+		p_buffer_current[p_write_index].complete = 0;
+	}
+}
+
 void Timer2_Handler(void)
 {
-	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
-
-	if (HAL_ADC_Start_IT(&hadc1) != HAL_OK)
+	if (capture_running)
 	{
-		Error_Handler();
+#if DEBUG1_TIMER
+	HAL_GPIO_WritePin(Debug1_GPIO_Port, Debug1_Pin, GPIO_PIN_SET);
+#endif
+		// TODO: GPS request, ADXL sync
+		test++;
+		if (test > 100)
+		{
+			p_data_point_t *p_buffer_current = (p_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL) ? p_buffer_2 : p_buffer_1;
+			p_buffer_current[p_write_index].complete |= P_COMPLETE_GPS;
+			p_buffer_write_inc();
+			test = 0;
+		}
+#if DEBUG1_TIMER
+	HAL_GPIO_WritePin(Debug1_GPIO_Port, Debug1_Pin, GPIO_PIN_RESET);
+#endif
 	}
-
-	// ~9µs for ADC Poll and GetValue
-	// HAL_ADC_PollForConversion(&hadc1, HAL_MAX_DELAY);
-	// uint32_t adc_val = HAL_ADC_GetValue(&hadc1);
-
-	// TODO: GPS request, ADXL sync
-
-	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
 }
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 {
-	if (capture_running && a_data_locked == 0 && a_data_write_index < A_DATA_BUFFER_SAVE_LEN)
+	if (capture_running)
 	{
+		// Write to a_buffer_2 if a_buffer_1 is full
+		a_data_point_t *a_buffer_current = (a_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL) ? a_buffer_2 : a_buffer_1;
+
+		// ADC for Piezo 1
 		if (hadc->Instance == ADC1)
 		{
-			// TODO: unsigned/signed?
-			a_data_buffer[a_data_write_index].a_piezo1 = HAL_ADC_GetValue(hadc);
-			a_data_buffer[a_data_write_index].x_mems1 = a_data_write_index;
-			a_data_buffer[a_data_write_index].complete |= A_COMPLETE_PZ1 | A_COMPLETE_PZ2 | A_COMPLETE_MEMS;
-			A_DATA_WRITE_INC
+#if DEBUG1_ADC1_CONV
+			HAL_GPIO_WritePin(Debug1_GPIO_Port, Debug1_Pin, GPIO_PIN_SET);
+#endif
+			// TODO: unsigned/signed? mems? 16-bit adc?
+			a_buffer_current[a_write_index].a_piezo1 = HAL_ADC_GetValue(hadc);
+			a_buffer_current[a_write_index].complete |= A_COMPLETE_PZ1 | A_COMPLETE_MEMS;
+			a_buffer_write_inc();
+#if DEBUG1_ADC1_CONV
+			HAL_GPIO_WritePin(Debug1_GPIO_Port, Debug1_Pin, GPIO_PIN_RESET);
+#endif
 		}
+		// ADC for Piezo 2
 		else if (hadc->Instance == ADC2)
 		{
-			a_data_buffer[a_data_write_index].a_piezo2 = HAL_ADC_GetValue(hadc);
-			a_data_buffer[a_data_write_index].complete |= A_COMPLETE_PZ2;
-			A_DATA_WRITE_INC
+#if DEBUG2_ADC2_CONV
+			HAL_GPIO_WritePin(Debug2_GPIO_Port, Debug2_Pin, GPIO_PIN_SET);
+#endif
+			a_buffer_current[a_write_index].a_piezo2 = HAL_ADC_GetValue(hadc);
+			a_buffer_current[a_write_index].complete |= A_COMPLETE_PZ2;
+			a_buffer_write_inc();
+#if DEBUG2_ADC2_CONV
+			HAL_GPIO_WritePin(Debug2_GPIO_Port, Debug2_Pin, GPIO_PIN_RESET);
+#endif
 		}
 	}
-	// HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
-	// HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
 }
 /* USER CODE END 4 */
 

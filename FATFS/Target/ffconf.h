@@ -215,10 +215,10 @@
 /  When enable exFAT, also LFN needs to be enabled. (_USE_LFN >= 1)
 /  Note that enabling exFAT discards C89 compatibility. */
 
-#define _FS_NORTC	0
-#define _NORTC_MON	6
-#define _NORTC_MDAY	4
-#define _NORTC_YEAR	2015
+#define _FS_NORTC	1
+#define _NORTC_MON	7
+#define _NORTC_MDAY	18
+#define _NORTC_YEAR	2024
 /* The option _FS_NORTC switches timestamp function. If the system does not have
 /  any RTC function or valid timestamp is not needed, set _FS_NORTC = 1 to disable
 /  the timestamp function. All objects modified by FatFs will have a fixed timestamp

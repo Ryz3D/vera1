@@ -27,6 +27,7 @@ void sd_update_file_paths();
 HAL_StatusTypeDef sd_init(uint8_t do_format);
 HAL_StatusTypeDef sd_uninit();
 HAL_StatusTypeDef sd_test();
-HAL_StatusTypeDef sd_log_a_data(struct a_data_point *a_data_buffer, uint32_t a_data_len);
+HAL_StatusTypeDef sd_log_a_data(a_data_point_t *a_data_buffer, uint32_t a_data_size);
+HAL_StatusTypeDef sd_log_p_data(p_data_point_t *p_data_buffer, uint32_t p_data_size);
 
 #endif /* INC_SD_H_ */
