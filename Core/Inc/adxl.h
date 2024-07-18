@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "config.h"
 #include "stm32f7xx_hal.h"
 
 #include <stdio.h>

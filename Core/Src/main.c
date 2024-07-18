@@ -33,20 +33,11 @@
 /* USER CODE BEGIN PD */
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 
-#define BUFFER_FLAG_BUFFER_1_FULL (1 << 0)
-#define BUFFER_FLAG_BUFFER_1_EMPTIED (1 << 1)
-#define BUFFER_FLAG_BUFFER_2_FULL (1 << 2)
-#define BUFFER_FLAG_BUFFER_2_EMPTIED (1 << 3)
-
-#define A_BUFFER_LEN 4096
-#define P_BUFFER_LEN 128
-
-#define DO_FORMAT 1
-
-#define DEBUG1_A_BUFFER_1_SD 0
-#define DEBUG2_A_BUFFER_2_SD 0
-#define DEBUG1_ADC1_CONV 1
-#define DEBUG2_ADC2_CONV 1
+#define BUFFER_FLAG_USE_BUFFER_2 (1 << 0)
+#define BUFFER_FLAG_SAVE_BUFFER_1 (1 << 1)
+#define BUFFER_FLAG_SAVE_BUFFER_2 (1 << 2)
+#define BUFFER_FLAG_OVERFLOW_BUFFER_1 (1 << 3)
+#define BUFFER_FLAG_OVERFLOW_BUFFER_2 (1 << 4)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -57,6 +48,7 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 ADC_HandleTypeDef hadc2;
+DMA_HandleTypeDef hdma_adc1;
 
 SD_HandleTypeDef hsd1;
 DMA_HandleTypeDef hdma_sdmmc1_rx;
@@ -70,17 +62,20 @@ UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
 uint8_t capture_running = 1;
+volatile uint8_t first_sample_done = 0;
 
-a_data_point_t a_buffer_1[A_BUFFER_LEN];
-a_data_point_t a_buffer_2[A_BUFFER_LEN];
-p_data_point_t p_buffer_1[P_BUFFER_LEN];
-p_data_point_t p_buffer_2[P_BUFFER_LEN];
-uint8_t a_buffer_flags = BUFFER_FLAG_BUFFER_2_EMPTIED;
-uint8_t p_buffer_flags = BUFFER_FLAG_BUFFER_2_EMPTIED;
-uint32_t a_write_index = 0;
-uint32_t p_write_index = 0;
+volatile uint16_t adc1_dma_buffer[ADC_BUFFER_LEN];
 
-uint32_t test = 0;
+volatile a_data_point_t a_buffer_1[A_BUFFER_LEN];
+volatile a_data_point_t a_buffer_2[A_BUFFER_LEN];
+volatile p_data_point_t p_buffer_1[P_BUFFER_LEN];
+volatile p_data_point_t p_buffer_2[P_BUFFER_LEN];
+volatile uint8_t a_buffer_flags = 0;
+volatile uint8_t p_buffer_flags = 0;
+volatile uint32_t a_write_index = 0;
+volatile uint32_t p_write_index = 0;
+
+volatile uint32_t ticks_counter = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -94,6 +89,7 @@ static void MX_USART3_UART_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_ADC2_Init(void);
 /* USER CODE BEGIN PFP */
+void switch_double_buffers(volatile uint8_t*);
 void a_buffer_write_inc(void);
 void p_buffer_write_inc(void);
 /* USER CODE END PFP */
@@ -149,17 +145,19 @@ int main(void)
 	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 
 	a_buffer_1[0].complete = 0;
+	a_buffer_1[0].timestamp = 0;
 	p_buffer_1[0].complete = 0;
+	p_buffer_1[0].timestamp = 0;
 
-	if (sd_init(DO_FORMAT) != HAL_OK)
+	if (sd_init(DO_FORMAT_SD) != HAL_OK)
 	{
 		Error_Handler();
 	}
 
-	// ADC
-	if (HAL_ADC_Start_IT(&hadc1) != HAL_OK)
+	// Start ADC
+	if (HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc1_dma_buffer, ADC_BUFFER_LEN) != HAL_OK)
 	{
-		printf("ADC1 HAL_ADC_Start_IT failed\r\n");
+		printf("ADC1 HAL_ADC_Start_DMA failed\r\n");
 		Error_Handler();
 	}
 	if (HAL_ADC_Start_IT(&hadc2) != HAL_OK)
@@ -167,8 +165,7 @@ int main(void)
 		printf("ADC2 HAL_ADC_Start_IT failed\r\n");
 		Error_Handler();
 	}
-
-	// Data capture timer
+	// Start data capture timer
 	if (HAL_TIM_Base_Start_IT(&htim2) != HAL_OK)
 	{
 		printf("HAL_TIM_Base_Start_IT failed\r\n");
@@ -186,73 +183,70 @@ int main(void)
 		/* USER CODE END WHILE */
 
 		/* USER CODE BEGIN 3 */
-		/*
-		 uint8_t buffer_1_full = a_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL;
-		 uint8_t buffer_1_emptied = a_buffer_flags & BUFFER_FLAG_BUFFER_1_EMPTIED;
-		 if (buffer_1_full != 0 && buffer_1_emptied == 0)
-		 */
-		// If a_buffer_1 is full and has not been saved
-		if ((a_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL) && !(a_buffer_flags & BUFFER_FLAG_BUFFER_1_EMPTIED))
+		// If a_buffer_1 is ready to save
+		if (a_buffer_flags & BUFFER_FLAG_SAVE_BUFFER_1)
 		{
-#if DEBUG1_A_BUFFER_1_SD
-			HAL_GPIO_TogglePin(Debug1_GPIO_Port, Debug1_Pin);
-#endif
+			DEBUG_A_BUFFER_1_SD
 			if (sd_log_a_data(a_buffer_1, sizeof(a_buffer_1)) != HAL_OK)
 			{
 				Error_Handler();
 			}
-			a_buffer_flags |= BUFFER_FLAG_BUFFER_1_EMPTIED;
-#if DEBUG1_A_BUFFER_1_SD
-			HAL_GPIO_TogglePin(Debug1_GPIO_Port, Debug1_Pin);
-#endif
+			// Flag a_buffer_1 as saved
+			a_buffer_flags &= ~BUFFER_FLAG_SAVE_BUFFER_1;
+			DEBUG_A_BUFFER_1_SD
 		}
-		// If a_buffer_2 is full and has not been saved
-		if ((a_buffer_flags & BUFFER_FLAG_BUFFER_2_FULL) && !(a_buffer_flags & BUFFER_FLAG_BUFFER_2_EMPTIED))
+		if (a_buffer_flags & BUFFER_FLAG_OVERFLOW_BUFFER_1)
 		{
-#if DEBUG2_A_BUFFER_2_SD
-			HAL_GPIO_TogglePin(Debug2_GPIO_Port, Debug2_Pin);
-#endif
+			printf("(%lu) WARNING: a_buffer_1 overflow", HAL_GetTick());
+		}
+		// If a_buffer_2 is ready to save
+		if (a_buffer_flags & BUFFER_FLAG_SAVE_BUFFER_2)
+		{
+			DEBUG_A_BUFFER_2_SD
 			if (sd_log_a_data(a_buffer_2, sizeof(a_buffer_2)) != HAL_OK)
 			{
 				Error_Handler();
 			}
-			a_buffer_flags |= BUFFER_FLAG_BUFFER_2_EMPTIED;
-#if DEBUG2_A_BUFFER_2_SD
-			HAL_GPIO_TogglePin(Debug2_GPIO_Port, Debug2_Pin);
-#endif
+			// Flag a_buffer_2 as saved
+			a_buffer_flags &= ~BUFFER_FLAG_SAVE_BUFFER_2;
+			DEBUG_A_BUFFER_2_SD
+		}
+		if (a_buffer_flags & BUFFER_FLAG_OVERFLOW_BUFFER_2)
+		{
+			printf("(%lu) WARNING: a_buffer_2 overflow", HAL_GetTick());
 		}
 
-		// If p_buffer_1 is full and has not been saved
-		if ((p_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL) && !(p_buffer_flags & BUFFER_FLAG_BUFFER_1_EMPTIED))
+		// If p_buffer_1 is ready to save
+		if (p_buffer_flags & BUFFER_FLAG_SAVE_BUFFER_1)
 		{
-#if DEBUG1_P_BUFFER_1_SD
-			HAL_GPIO_TogglePin(Debug1_GPIO_Port, Debug1_Pin);
-#endif
+			DEBUG_P_BUFFER_1_SD
 			if (sd_log_p_data(p_buffer_1, sizeof(p_buffer_1)) != HAL_OK)
 			{
 				Error_Handler();
 			}
-			printf("p_buffer_1\r\n");
-			p_buffer_flags |= BUFFER_FLAG_BUFFER_1_EMPTIED;
-#if DEBUG1_P_BUFFER_1_SD
-			HAL_GPIO_TogglePin(Debug1_GPIO_Port, Debug1_Pin);
-#endif
+			// Flag p_buffer_1 as saved
+			p_buffer_flags &= ~BUFFER_FLAG_SAVE_BUFFER_1;
+			DEBUG_P_BUFFER_1_SD
 		}
-		// If p_buffer_2 is full and has not been saved
-		if ((p_buffer_flags & BUFFER_FLAG_BUFFER_2_FULL) && !(p_buffer_flags & BUFFER_FLAG_BUFFER_2_EMPTIED))
+		if (p_buffer_flags & BUFFER_FLAG_OVERFLOW_BUFFER_1)
 		{
-#if DEBUG2_P_BUFFER_2_SD
-			HAL_GPIO_TogglePin(Debug2_GPIO_Port, Debug2_Pin);
-#endif
+			printf("(%lu) WARNING: p_buffer_1 overflow", HAL_GetTick());
+		}
+		// If p_buffer_2 is ready to save
+		if (p_buffer_flags & BUFFER_FLAG_SAVE_BUFFER_2)
+		{
+			DEBUG_P_BUFFER_2_SD
 			if (sd_log_p_data(p_buffer_2, sizeof(p_buffer_2)) != HAL_OK)
 			{
 				Error_Handler();
 			}
-			printf("p_buffer_2\r\n");
-			p_buffer_flags |= BUFFER_FLAG_BUFFER_2_EMPTIED;
-#if DEBUG2_P_BUFFER_2_SD
-			HAL_GPIO_TogglePin(Debug2_GPIO_Port, Debug2_Pin);
-#endif
+			// Flag p_buffer_2 as saved
+			p_buffer_flags &= ~BUFFER_FLAG_SAVE_BUFFER_2;
+			DEBUG_P_BUFFER_2_SD
+		}
+		if (p_buffer_flags & BUFFER_FLAG_OVERFLOW_BUFFER_2)
+		{
+			printf("(%lu) WARNING: p_buffer_2 overflow", HAL_GetTick());
 		}
 
 		if (HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin) == GPIO_PIN_SET)
@@ -262,10 +256,11 @@ int main(void)
 		}
 	}
 
-	if (sd_uninit() != HAL_OK)
-	{
-		Error_Handler();
-	}
+	HAL_ADC_Stop_IT(&hadc1);
+	HAL_TIM_Base_Stop_IT(&htim2);
+
+	sd_uninit();
+
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 	printf("(%lu) Capture stopped\r\n", HAL_GetTick());
 	/* USER CODE END 3 */
@@ -296,7 +291,7 @@ void SystemClock_Config(void)
 	RCC_OscInitStruct.PLL.PLLM = 16;
 	RCC_OscInitStruct.PLL.PLLN = 192;
 	RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-	RCC_OscInitStruct.PLL.PLLQ = 12;
+	RCC_OscInitStruct.PLL.PLLQ = 6;
 	RCC_OscInitStruct.PLL.PLLR = 2;
 	if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
 	{
@@ -347,14 +342,14 @@ static void MX_ADC1_Init(void)
 	hadc1.Instance = ADC1;
 	hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
 	hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-	hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
+	hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
 	hadc1.Init.ContinuousConvMode = DISABLE;
 	hadc1.Init.DiscontinuousConvMode = DISABLE;
 	hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
 	hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T2_TRGO;
 	hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-	hadc1.Init.NbrOfConversion = 1;
-	hadc1.Init.DMAContinuousRequests = DISABLE;
+	hadc1.Init.NbrOfConversion = 3;
+	hadc1.Init.DMAContinuousRequests = ENABLE;
 	hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
 	if (HAL_ADC_Init(&hadc1) != HAL_OK)
 	{
@@ -363,9 +358,27 @@ static void MX_ADC1_Init(void)
 
 	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
 	 */
-	sConfig.Channel = ADC_CHANNEL_9;
+	sConfig.Channel = ADC_CHANNEL_0;
 	sConfig.Rank = ADC_REGULAR_RANK_1;
 	sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+	{
+		Error_Handler();
+	}
+
+	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+	 */
+	sConfig.Channel = ADC_CHANNEL_3;
+	sConfig.Rank = ADC_REGULAR_RANK_2;
+	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+	{
+		Error_Handler();
+	}
+
+	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+	 */
+	sConfig.Channel = ADC_CHANNEL_4;
+	sConfig.Rank = ADC_REGULAR_RANK_3;
 	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
 	{
 		Error_Handler();
@@ -407,7 +420,7 @@ static void MX_ADC2_Init(void)
 	hadc2.Init.DataAlign = ADC_DATAALIGN_RIGHT;
 	hadc2.Init.NbrOfConversion = 1;
 	hadc2.Init.DMAContinuousRequests = DISABLE;
-	hadc2.Init.EOCSelection = ADC_EOC_SEQ_CONV;
+	hadc2.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
 	if (HAL_ADC_Init(&hadc2) != HAL_OK)
 	{
 		Error_Handler();
@@ -415,7 +428,7 @@ static void MX_ADC2_Init(void)
 
 	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
 	 */
-	sConfig.Channel = ADC_CHANNEL_12;
+	sConfig.Channel = ADC_CHANNEL_6;
 	sConfig.Rank = ADC_REGULAR_RANK_1;
 	sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
 	if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
@@ -586,6 +599,9 @@ static void MX_DMA_Init(void)
 	__HAL_RCC_DMA2_CLK_ENABLE();
 
 	/* DMA interrupt init */
+	/* DMA2_Stream0_IRQn interrupt configuration */
+	HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
+	HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
 	/* DMA2_Stream3_IRQn interrupt configuration */
 	HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 0, 0);
 	HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
@@ -628,6 +644,9 @@ static void MX_GPIO_Init(void)
 	/*Configure GPIO pin Output Level */
 	HAL_GPIO_WritePin(USB_PowerSwitchOn_GPIO_Port, USB_PowerSwitchOn_Pin, GPIO_PIN_RESET);
 
+	/*Configure GPIO pin Output Level */
+	HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_RESET);
+
 	/*Configure GPIO pin : USER_Btn_Pin */
 	GPIO_InitStruct.Pin = USER_Btn_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
@@ -661,7 +680,7 @@ static void MX_GPIO_Init(void)
 	GPIO_InitStruct.Pin = Debug2_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 	HAL_GPIO_Init(Debug2_GPIO_Port, &GPIO_InitStruct);
 
 	/*Configure GPIO pin : Debug1_Pin */
@@ -679,11 +698,11 @@ static void MX_GPIO_Init(void)
 	GPIO_InitStruct.Alternate = GPIO_AF11_ETH;
 	HAL_GPIO_Init(RMII_TXD1_GPIO_Port, &GPIO_InitStruct);
 
-	/*Configure GPIO pin : uSD_Detect_Pin */
-	GPIO_InitStruct.Pin = uSD_Detect_Pin;
+	/*Configure GPIO pins : uSD_Detect_Pin USB_OverCurrent_Pin */
+	GPIO_InitStruct.Pin = uSD_Detect_Pin | USB_OverCurrent_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-	GPIO_InitStruct.Pull = GPIO_PULLUP;
-	HAL_GPIO_Init(uSD_Detect_GPIO_Port, &GPIO_InitStruct);
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
 
 	/*Configure GPIO pin : USB_PowerSwitchOn_Pin */
 	GPIO_InitStruct.Pin = USB_PowerSwitchOn_Pin;
@@ -691,12 +710,6 @@ static void MX_GPIO_Init(void)
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 	HAL_GPIO_Init(USB_PowerSwitchOn_GPIO_Port, &GPIO_InitStruct);
-
-	/*Configure GPIO pin : USB_OverCurrent_Pin */
-	GPIO_InitStruct.Pin = USB_OverCurrent_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	HAL_GPIO_Init(USB_OverCurrent_GPIO_Port, &GPIO_InitStruct);
 
 	/*Configure GPIO pins : USB_SOF_Pin USB_ID_Pin USB_DM_Pin USB_DP_Pin */
 	GPIO_InitStruct.Pin = USB_SOF_Pin | USB_ID_Pin | USB_DM_Pin | USB_DP_Pin;
@@ -711,6 +724,19 @@ static void MX_GPIO_Init(void)
 	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	HAL_GPIO_Init(USB_VBUS_GPIO_Port, &GPIO_InitStruct);
+
+	/*Configure GPIO pins : MEMS_DRDY_Pin MEMS_INT2_Pin MEMS_INT1_Pin */
+	GPIO_InitStruct.Pin = MEMS_DRDY_Pin | MEMS_INT2_Pin | MEMS_INT1_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+	/*Configure GPIO pin : SPI1_CS_Pin */
+	GPIO_InitStruct.Pin = SPI1_CS_Pin;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+	HAL_GPIO_Init(SPI1_CS_GPIO_Port, &GPIO_InitStruct);
 
 	/*Configure GPIO pins : RMII_TX_EN_Pin RMII_TXD0_Pin */
 	GPIO_InitStruct.Pin = RMII_TX_EN_Pin | RMII_TXD0_Pin;
@@ -739,110 +765,93 @@ PUTCHAR_PROTOTYPE
 	return ch;
 }
 
-void switch_double_buffers(uint8_t *buffer_flags)
+void switch_double_buffers(volatile uint8_t *buffer_flags)
 {
 	// If buffer_2 has been filled
-	if (*buffer_flags & BUFFER_FLAG_BUFFER_1_FULL)
+	if (*buffer_flags & BUFFER_FLAG_USE_BUFFER_2)
 	{
 		// If buffer_1 has been emptied
-		if (*buffer_flags & BUFFER_FLAG_BUFFER_1_EMPTIED)
+		if ((*buffer_flags & BUFFER_FLAG_SAVE_BUFFER_1) == 0)
 		{
 			// buffer_2 full
-			*buffer_flags |= BUFFER_FLAG_BUFFER_2_FULL;
+			*buffer_flags |= BUFFER_FLAG_SAVE_BUFFER_2;
 			// Reset buffer_1 to use
-			*buffer_flags &= ~BUFFER_FLAG_BUFFER_1_FULL & ~BUFFER_FLAG_BUFFER_1_EMPTIED;
+			*buffer_flags &= ~BUFFER_FLAG_USE_BUFFER_2;
 		}
 		else
 		{
-			printf("(%lu) WARNING: buffer_2 overflowing! (Flags in %p)\r\n", HAL_GetTick(), buffer_flags);
+			// Both buffers are full, flag as overflow
+			*buffer_flags |= BUFFER_FLAG_OVERFLOW_BUFFER_2;
 		}
 	}
 	// If buffer_1 has been filled
 	else
 	{
 		// If buffer_2 has been emptied
-		if (*buffer_flags & BUFFER_FLAG_BUFFER_2_EMPTIED)
+		if ((*buffer_flags & BUFFER_FLAG_SAVE_BUFFER_2) == 0)
 		{
 			// buffer_1 full
-			*buffer_flags |= BUFFER_FLAG_BUFFER_1_FULL;
+			*buffer_flags |= BUFFER_FLAG_SAVE_BUFFER_1;
 			// Reset buffer_2 to use
-			*buffer_flags &= ~BUFFER_FLAG_BUFFER_2_FULL & ~BUFFER_FLAG_BUFFER_2_EMPTIED;
+			*buffer_flags |= BUFFER_FLAG_USE_BUFFER_2;
 		}
 		else
 		{
-			printf("(%lu) WARNING: buffer_1 overflowing! (Flags in %p)\r\n", HAL_GetTick(), buffer_flags);
+			// Both buffers are full, flag as overflow
+			*buffer_flags |= BUFFER_FLAG_OVERFLOW_BUFFER_1;
 		}
 	}
 }
 
 void a_buffer_write_inc()
 {
-	a_data_point_t *a_buffer_current = (a_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL) ? a_buffer_2 : a_buffer_1;
-
-	// If data of current datapoint is complete
-	if (a_buffer_current[a_write_index].complete >= 0b111)
+	// If next index would overflow
+	if (++a_write_index >= A_BUFFER_LEN)
 	{
-		// Set timestamp to time of completion
-		a_buffer_current[a_write_index].timestamp = HAL_GetTick();
-		a_buffer_current[a_write_index].x_mems1 = a_write_index;
-
-		// If next index would overflow
-		if (++a_write_index >= A_BUFFER_LEN)
-		{
-			// Switch buffers
-			a_write_index = 0;
-			switch_double_buffers(&a_buffer_flags);
-		}
-
-		a_buffer_current = (a_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL) ? a_buffer_2 : a_buffer_1;
-		a_buffer_current[a_write_index].complete = 0;
+		// Switch buffers
+		a_write_index = 0;
+		switch_double_buffers(&a_buffer_flags);
 	}
+
+	volatile a_data_point_t *a_buffer_current = (a_buffer_flags & BUFFER_FLAG_USE_BUFFER_2) ? a_buffer_2 : a_buffer_1;
+	a_buffer_current[a_write_index].complete = 0;
+	a_buffer_current[a_write_index].timestamp = ticks_counter;
+	a_buffer_current[a_write_index].x_mems1 = a_write_index;
 }
 
 void p_buffer_write_inc()
 {
-	p_data_point_t *p_buffer_current = (p_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL) ? p_buffer_2 : p_buffer_1;
-
-	// If data of current data point is complete
-	if (p_buffer_current[p_write_index].complete >= 0b1)
+	// If next index would overflow
+	if (++p_write_index >= P_BUFFER_LEN)
 	{
-		// Set timestamp to time of completion
-		p_buffer_current[p_write_index].timestamp = HAL_GetTick();
-		p_buffer_current[p_write_index].height = p_write_index;
-
-		// If next index would overflow
-		if (++p_write_index >= P_BUFFER_LEN)
-		{
-			// Switch buffers
-			p_write_index = 0;
-			switch_double_buffers(&p_buffer_flags);
-		}
-
-		p_buffer_current = (p_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL) ? p_buffer_2 : p_buffer_1;
-		p_buffer_current[p_write_index].complete = 0;
+		// Switch buffers
+		p_write_index = 0;
+		switch_double_buffers(&p_buffer_flags);
 	}
+
+	volatile p_data_point_t *p_buffer_current = (p_buffer_flags & BUFFER_FLAG_USE_BUFFER_2) ? p_buffer_2 : p_buffer_1;
+	p_buffer_current[p_write_index].complete = 0;
+	p_buffer_current[p_write_index].timestamp = ticks_counter;
+	p_buffer_current[p_write_index].gps_time = p_write_index;
 }
 
 void Timer2_Handler(void)
 {
-	if (capture_running)
+	DEBUG_TIMER
+	if (capture_running && first_sample_done)
 	{
-#if DEBUG1_TIMER
-	HAL_GPIO_WritePin(Debug1_GPIO_Port, Debug1_Pin, GPIO_PIN_SET);
-#endif
-		// TODO: GPS request, ADXL sync
-		test++;
-		if (test > 100)
+		a_buffer_write_inc();
+		// TODO: ADXL sync
+		if (ticks_counter % 100 == 0)
 		{
-			p_data_point_t *p_buffer_current = (p_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL) ? p_buffer_2 : p_buffer_1;
+			volatile p_data_point_t *p_buffer_current = (p_buffer_flags & BUFFER_FLAG_USE_BUFFER_2) ? p_buffer_2 : p_buffer_1;
 			p_buffer_current[p_write_index].complete |= P_COMPLETE_GPS;
 			p_buffer_write_inc();
-			test = 0;
 		}
-#if DEBUG1_TIMER
-	HAL_GPIO_WritePin(Debug1_GPIO_Port, Debug1_Pin, GPIO_PIN_RESET);
-#endif
 	}
+	first_sample_done = 1;
+	ticks_counter++;
+	DEBUG_TIMER
 }
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
@@ -850,34 +859,30 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 	if (capture_running)
 	{
 		// Write to a_buffer_2 if a_buffer_1 is full
-		a_data_point_t *a_buffer_current = (a_buffer_flags & BUFFER_FLAG_BUFFER_1_FULL) ? a_buffer_2 : a_buffer_1;
+		volatile a_data_point_t *a_buffer_current = (a_buffer_flags & BUFFER_FLAG_USE_BUFFER_2) ? a_buffer_2 : a_buffer_1;
 
-		// ADC for Piezo 1
+		// ADC for piezo sensors
 		if (hadc->Instance == ADC1)
 		{
-#if DEBUG1_ADC1_CONV
-			HAL_GPIO_WritePin(Debug1_GPIO_Port, Debug1_Pin, GPIO_PIN_SET);
+			DEBUG_ADC1_CONV
+			a_buffer_current[a_write_index].a_piezo1 = adc1_dma_buffer[0];
+			a_buffer_current[a_write_index].a_piezo2 = adc1_dma_buffer[1];
+			a_buffer_current[a_write_index].complete |= A_COMPLETE_PZ1 | A_COMPLETE_PZ2;
+#if ENABLE_ADC3
+			a_buffer_current[a_write_index].a_piezo3 = adc1_dma_buffer[2];
+			a_buffer_current[a_write_index].complete |= A_COMPLETE_PZ3;
 #endif
-			// TODO: unsigned/signed? mems? 16-bit adc?
-			a_buffer_current[a_write_index].a_piezo1 = HAL_ADC_GetValue(hadc);
-			a_buffer_current[a_write_index].complete |= A_COMPLETE_PZ1 | A_COMPLETE_MEMS;
-			a_buffer_write_inc();
-#if DEBUG1_ADC1_CONV
-			HAL_GPIO_WritePin(Debug1_GPIO_Port, Debug1_Pin, GPIO_PIN_RESET);
-#endif
+			DEBUG_ADC1_CONV
 		}
-		// ADC for Piezo 2
+		// ADC for BOD
 		else if (hadc->Instance == ADC2)
 		{
-#if DEBUG2_ADC2_CONV
-			HAL_GPIO_WritePin(Debug2_GPIO_Port, Debug2_Pin, GPIO_PIN_SET);
-#endif
-			a_buffer_current[a_write_index].a_piezo2 = HAL_ADC_GetValue(hadc);
-			a_buffer_current[a_write_index].complete |= A_COMPLETE_PZ2;
-			a_buffer_write_inc();
-#if DEBUG2_ADC2_CONV
-			HAL_GPIO_WritePin(Debug2_GPIO_Port, Debug2_Pin, GPIO_PIN_RESET);
-#endif
+			uint16_t adc2_value = HAL_ADC_GetValue(hadc);
+			if (adc2_value <= 4065)
+			{
+				// TODO: BOD
+				// printf("BOD: %hu\r\n", adc2_value);
+			}
 		}
 	}
 }

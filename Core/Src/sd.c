@@ -30,12 +30,9 @@ void sd_update_file_paths()
 
 HAL_StatusTypeDef sd_init(uint8_t do_format)
 {
-	// TODO: GPIO speed SDMMC high (bis 100 MHz) https://fastbitlab.com/gpio-output-speed-register-applicability/
-	// TODO: SDMMC CLK 48Mhz
-
-	if (HAL_GPIO_ReadPin(uSD_Detect_GPIO_Port, uSD_Detect_Pin))
+	if (HAL_GPIO_ReadPin(uSD_Detect_GPIO_Port, uSD_Detect_Pin) == GPIO_PIN_SET)
 	{
-		printf("WARNING: No SD Card detected!\r\n");
+		printf("WARNING: No SD card detected!\r\n");
 	}
 
 	if (f_mount(&SDFatFS, (TCHAR const*)SDPath, 0) != FR_OK)
@@ -46,6 +43,7 @@ HAL_StatusTypeDef sd_init(uint8_t do_format)
 
 	if (do_format)
 	{
+		printf("Formatting SD card...\r\n");
 		uint8_t rtext[_MAX_SS];
 		if (f_mkfs((TCHAR const*)SDPath, FM_ANY, 0, rtext, sizeof(rtext)) != FR_OK)
 		{
@@ -127,7 +125,7 @@ HAL_StatusTypeDef sd_uninit()
 	return HAL_OK;
 }
 
-HAL_StatusTypeDef sd_log_a_data(a_data_point_t *a_data_buffer, uint32_t a_data_size)
+HAL_StatusTypeDef sd_log_a_data(volatile a_data_point_t *a_data_buffer, uint32_t a_data_size)
 {
 	if (f_open(&SDFile, a_file_path, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
 	{
@@ -149,7 +147,7 @@ HAL_StatusTypeDef sd_log_a_data(a_data_point_t *a_data_buffer, uint32_t a_data_s
 	return HAL_OK;
 }
 
-HAL_StatusTypeDef sd_log_p_data(p_data_point_t *p_data_buffer, uint32_t p_data_size)
+HAL_StatusTypeDef sd_log_p_data(volatile p_data_point_t *p_data_buffer, uint32_t p_data_size)
 {
 	if (f_open(&SDFile, p_file_path, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
 	{

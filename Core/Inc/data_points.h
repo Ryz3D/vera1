@@ -8,9 +8,14 @@
 #ifndef INC_DATA_POINTS_H_
 #define INC_DATA_POINTS_H_
 
+#include "config.h"
+
 #define A_COMPLETE_MEMS (1 << 0)
 #define A_COMPLETE_PZ1 (1 << 1)
 #define A_COMPLETE_PZ2 (1 << 2)
+#if ENABLE_ADC3
+#define A_COMPLETE_PZ3 (1 << 3)
+#endif
 #define P_COMPLETE_GPS (1 << 0)
 
 #define A_DATA_POINT_FORMAT "M %li\tP %li\tP %li\tC %u\r\n"
@@ -20,8 +25,12 @@ typedef struct
 {
 	uint8_t complete;
 	uint32_t timestamp;
-	int32_t a_piezo1;
-	int32_t a_piezo2;
+	uint16_t a_piezo1;
+	uint16_t a_piezo2;
+#if ENABLE_ADC3
+	uint16_t a_piezo3;
+#endif
+	uint16_t temp_mems1;
 	int32_t x_mems1;
 	int32_t y_mems1;
 	int32_t z_mems1;
@@ -31,6 +40,7 @@ typedef struct
 {
 	uint8_t complete;
 	uint32_t timestamp;
+	uint32_t gps_time;
 	double lat;
 	double lon;
 	double height;

@@ -34,6 +34,7 @@ extern "C" {
 #include <stdio.h>
 #include <string.h>
 
+#include "config.h"
 #include "adxl.h"
 #include "data_points.h"
 /* USER CODE END Includes */
@@ -63,8 +64,6 @@ void Timer2_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define USER_Btn_Pin GPIO_PIN_13
 #define USER_Btn_GPIO_Port GPIOC
-#define MCO_Pin GPIO_PIN_0
-#define MCO_GPIO_Port GPIOH
 #define RMII_MDC_Pin GPIO_PIN_1
 #define RMII_MDC_GPIO_Port GPIOC
 #define RMII_REF_CLK_Pin GPIO_PIN_1
@@ -111,6 +110,14 @@ void Timer2_Handler(void);
 #define TMS_GPIO_Port GPIOA
 #define TCK_Pin GPIO_PIN_14
 #define TCK_GPIO_Port GPIOA
+#define MEMS_DRDY_Pin GPIO_PIN_3
+#define MEMS_DRDY_GPIO_Port GPIOD
+#define MEMS_INT2_Pin GPIO_PIN_4
+#define MEMS_INT2_GPIO_Port GPIOD
+#define MEMS_INT1_Pin GPIO_PIN_5
+#define MEMS_INT1_GPIO_Port GPIOD
+#define SPI1_CS_Pin GPIO_PIN_6
+#define SPI1_CS_GPIO_Port GPIOD
 #define RMII_TX_EN_Pin GPIO_PIN_11
 #define RMII_TX_EN_GPIO_Port GPIOG
 #define RMII_TXD0_Pin GPIO_PIN_13
