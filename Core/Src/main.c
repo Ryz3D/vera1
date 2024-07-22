@@ -48,7 +48,7 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 ADC_HandleTypeDef hadc2;
-DMA_HandleTypeDef hdma_adc1;
+DMA_HandleTypeDef hdma_adc2;
 
 SD_HandleTypeDef hsd1;
 DMA_HandleTypeDef hdma_sdmmc1_rx;
@@ -61,11 +61,11 @@ TIM_HandleTypeDef htim2;
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
-uint8_t capture_running = 1;
-volatile uint8_t first_sample_done = 0;
+volatile uint8_t capture_running = 1;
+volatile uint32_t ticks_counter = 0;
 volatile uint8_t bod_active = 0;
 
-volatile uint16_t adc1_dma_buffer[PIEZO_COUNT];
+volatile uint16_t adc2_dma_buffer[PIEZO_COUNT];
 
 volatile a_data_point_t a_buffer_1[A_BUFFER_LEN];
 volatile a_data_point_t a_buffer_2[A_BUFFER_LEN];
@@ -75,8 +75,6 @@ volatile uint8_t a_buffer_flags = 0;
 volatile uint8_t p_buffer_flags = 0;
 volatile uint32_t a_write_index = 0;
 volatile uint32_t p_write_index = 0;
-
-volatile uint32_t ticks_counter = 0;
 
 const char *str_sd_log_error = "ERROR: sd_flush_log failed\r\n";
 /* USER CODE END PV */
@@ -164,16 +162,16 @@ int main(void)
 		Error_Handler();
 	}
 
-	// Start piezo ADC
-	if (HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc1_dma_buffer, PIEZO_COUNT) != HAL_OK)
+	// Start BOD ADC
+	if (HAL_ADC_Start_IT(&hadc1) != HAL_OK)
 	{
-		printf("(%lu) ERROR: main: ADC1 HAL_ADC_Start_DMA failed\r\n", HAL_GetTick());
+		printf("(%lu) ERROR: main: ADC1 HAL_ADC_Start_IT failed\r\n", HAL_GetTick());
 		Error_Handler();
 	}
-	// Start BOD ADC
-	if (HAL_ADC_Start_IT(&hadc2) != HAL_OK)
+	// Start piezo ADC
+	if (HAL_ADC_Start_DMA(&hadc2, (uint32_t*)adc2_dma_buffer, PIEZO_COUNT) != HAL_OK)
 	{
-		printf("(%lu) ERROR: main: ADC2 HAL_ADC_Start_IT failed\r\n", HAL_GetTick());
+		printf("(%lu) ERROR: main: ADC2 HAL_ADC_Start_DMA failed\r\n", HAL_GetTick());
 		Error_Handler();
 	}
 	// Start data capture timer
@@ -268,18 +266,8 @@ int main(void)
 		if (bod_active)
 		{
 			// __disable_irq();
-			// HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 			// while (1)
-			// {
-			// DEBUG1
-			// }
-			/*
-			 printf("(%lu) BOD\r\n", HAL_GetTick());
-			 sd_flush_log();
-			 sd_uninit();
-			 while (1)
-			 ;
-			 */
+			// 	;
 		}
 
 		if (HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin) == GPIO_PIN_SET)
@@ -289,8 +277,9 @@ int main(void)
 		}
 	}
 
-	HAL_ADC_Stop_IT(&hadc1);
 	HAL_TIM_Base_Stop_IT(&htim2);
+	HAL_ADC_Stop_IT(&hadc1);
+	HAL_ADC_Stop_IT(&hadc2);
 
 	// Save remaining data
 	volatile a_data_point_t *a_buffer_current = (a_buffer_flags & BUFFER_FLAG_USE_BUFFER_2) ? a_buffer_2 : a_buffer_1;
@@ -384,6 +373,7 @@ static void MX_ADC1_Init(void)
 
 	/* USER CODE END ADC1_Init 0 */
 
+	ADC_AnalogWDGConfTypeDef AnalogWDGConfig = { 0 };
 	ADC_ChannelConfTypeDef sConfig = { 0 };
 
 	/* USER CODE BEGIN ADC1_Init 1 */
@@ -401,37 +391,30 @@ static void MX_ADC1_Init(void)
 	hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
 	hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T2_TRGO;
 	hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-	hadc1.Init.NbrOfConversion = 3;
-	hadc1.Init.DMAContinuousRequests = ENABLE;
+	hadc1.Init.NbrOfConversion = 1;
+	hadc1.Init.DMAContinuousRequests = DISABLE;
 	hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
 	if (HAL_ADC_Init(&hadc1) != HAL_OK)
 	{
 		Error_Handler();
 	}
 
+	/** Configure the analog watchdog
+	 */
+	AnalogWDGConfig.WatchdogMode = ADC_ANALOGWATCHDOG_ALL_REG;
+	AnalogWDGConfig.HighThreshold = 4095;
+	AnalogWDGConfig.LowThreshold = 1000;
+	AnalogWDGConfig.ITMode = ENABLE;
+	if (HAL_ADC_AnalogWDGConfig(&hadc1, &AnalogWDGConfig) != HAL_OK)
+	{
+		Error_Handler();
+	}
+
 	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
 	 */
-	sConfig.Channel = ADC_CHANNEL_0;
+	sConfig.Channel = ADC_CHANNEL_VBAT;
 	sConfig.Rank = ADC_REGULAR_RANK_1;
-	sConfig.SamplingTime = ADC_SAMPLETIME_15CYCLES;
-	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-	{
-		Error_Handler();
-	}
-
-	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
-	 */
-	sConfig.Channel = ADC_CHANNEL_3;
-	sConfig.Rank = ADC_REGULAR_RANK_2;
-	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-	{
-		Error_Handler();
-	}
-
-	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
-	 */
-	sConfig.Channel = ADC_CHANNEL_4;
-	sConfig.Rank = ADC_REGULAR_RANK_3;
+	sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
 	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
 	{
 		Error_Handler();
@@ -465,15 +448,15 @@ static void MX_ADC2_Init(void)
 	hadc2.Instance = ADC2;
 	hadc2.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
 	hadc2.Init.Resolution = ADC_RESOLUTION_12B;
-	hadc2.Init.ScanConvMode = ADC_SCAN_DISABLE;
+	hadc2.Init.ScanConvMode = ADC_SCAN_ENABLE;
 	hadc2.Init.ContinuousConvMode = DISABLE;
 	hadc2.Init.DiscontinuousConvMode = DISABLE;
 	hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
 	hadc2.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T2_TRGO;
 	hadc2.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-	hadc2.Init.NbrOfConversion = 1;
-	hadc2.Init.DMAContinuousRequests = DISABLE;
-	hadc2.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+	hadc2.Init.NbrOfConversion = 3;
+	hadc2.Init.DMAContinuousRequests = ENABLE;
+	hadc2.Init.EOCSelection = ADC_EOC_SEQ_CONV;
 	if (HAL_ADC_Init(&hadc2) != HAL_OK)
 	{
 		Error_Handler();
@@ -481,9 +464,27 @@ static void MX_ADC2_Init(void)
 
 	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
 	 */
-	sConfig.Channel = ADC_CHANNEL_6;
+	sConfig.Channel = ADC_CHANNEL_0;
 	sConfig.Rank = ADC_REGULAR_RANK_1;
-	sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+	sConfig.SamplingTime = ADC_SAMPLETIME_144CYCLES;
+	if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
+	{
+		Error_Handler();
+	}
+
+	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+	 */
+	sConfig.Channel = ADC_CHANNEL_3;
+	sConfig.Rank = ADC_REGULAR_RANK_2;
+	if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
+	{
+		Error_Handler();
+	}
+
+	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+	 */
+	sConfig.Channel = ADC_CHANNEL_4;
+	sConfig.Rank = ADC_REGULAR_RANK_3;
 	if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
 	{
 		Error_Handler();
@@ -652,9 +653,9 @@ static void MX_DMA_Init(void)
 	__HAL_RCC_DMA2_CLK_ENABLE();
 
 	/* DMA interrupt init */
-	/* DMA2_Stream0_IRQn interrupt configuration */
-	HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
-	HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+	/* DMA2_Stream2_IRQn interrupt configuration */
+	HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, 0, 0);
+	HAL_NVIC_EnableIRQ(DMA2_Stream2_IRQn);
 	/* DMA2_Stream3_IRQn interrupt configuration */
 	HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 0, 0);
 	HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
@@ -720,6 +721,12 @@ static void MX_GPIO_Init(void)
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
 	GPIO_InitStruct.Alternate = GPIO_AF11_ETH;
+	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+	/*Configure GPIO pin : PA3 */
+	GPIO_InitStruct.Pin = GPIO_PIN_3;
+	GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 	/*Configure GPIO pins : LD1_Pin LD3_Pin LD2_Pin */
@@ -896,7 +903,7 @@ void p_buffer_write_inc()
 void Timer2_Handler(void)
 {
 	DEBUG_TIMER
-	if (capture_running && first_sample_done)
+	if (capture_running && ticks_counter > 0)
 	{
 		a_buffer_write_inc();
 		// TODO: ADXL sync
@@ -907,7 +914,6 @@ void Timer2_Handler(void)
 			p_buffer_write_inc();
 		}
 	}
-	first_sample_done = 1;
 	ticks_counter++;
 	DEBUG_TIMER
 }
@@ -916,27 +922,30 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 {
 	if (capture_running)
 	{
-		// Write to a_buffer_2 if a_buffer_1 is full
-		volatile a_data_point_t *a_buffer_current = (a_buffer_flags & BUFFER_FLAG_USE_BUFFER_2) ? a_buffer_2 : a_buffer_1;
-
 		// ADC for piezo sensors
-		if (hadc->Instance == ADC1)
+		if (hadc->Instance == ADC2)
 		{
-			DEBUG_ADC1_CONV
-			memcpy((void*)a_buffer_current[a_write_index].a_piezo, (void*)adc1_dma_buffer, PIEZO_COUNT * sizeof(uint16_t));
+			DEBUG_ADC2_CONV
+			// Write to a_buffer_2 if a_buffer_1 is full
+			volatile a_data_point_t *a_buffer_current = (a_buffer_flags & BUFFER_FLAG_USE_BUFFER_2) ? a_buffer_2 : a_buffer_1;
+			memcpy((void*)a_buffer_current[a_write_index].a_piezo, (void*)adc2_dma_buffer, PIEZO_COUNT * sizeof(uint16_t));
 			a_buffer_current[a_write_index].complete |= A_COMPLETE_PZ;
-			DEBUG_ADC1_CONV
-		}
-		// ADC for BOD
-		else if (hadc->Instance == ADC2)
-		{
-			uint16_t adc2_value = HAL_ADC_GetValue(hadc);
-			if (adc2_value <= 4065)
-			{
-				bod_active = 1;
-			}
+			DEBUG_ADC2_CONV
 		}
 	}
+}
+
+void HAL_ADC_LevelOutOfWindowCallback(ADC_HandleTypeDef *hadc)
+{
+	bod_active = 1;
+	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+	while (1)
+	{
+		DEBUG1
+	}
+	// printf("(%lu) BOD\r\n", HAL_GetTick());
+	// sd_flush_log();
+	// sd_uninit();
 }
 /* USER CODE END 4 */
 
@@ -949,11 +958,12 @@ void Error_Handler(void)
 	/* USER CODE BEGIN Error_Handler_Debug */
 	/* User can add his own implementation to report the HAL error return state */
 	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
-	printf("Fatal Error\r\n");
+	printf("(%lu) Fatal Error\r\n", HAL_GetTick());
+	sd_flush_log();
+	sd_uninit();
 	__disable_irq();
 	while (1)
-	{
-	}
+		;
 	/* USER CODE END Error_Handler_Debug */
 }
 

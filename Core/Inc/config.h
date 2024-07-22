@@ -13,6 +13,9 @@
 
 #define PIEZO_COUNT 3
 
+#define USE_ADC3_PZ2 0
+
+// Reserved for BOD testing
 #define DEBUG1 HAL_GPIO_TogglePin(Debug1_GPIO_Port, Debug1_Pin);
 #define DEBUG2 HAL_GPIO_TogglePin(Debug2_GPIO_Port, Debug2_Pin);
 
@@ -25,8 +28,8 @@
 // Saving p_buffer_2 to a file
 #define DEBUG_P_BUFFER_2_SD ;
 // Data capture timer interrupt
-#define DEBUG_TIMER ;//DEBUG1
+#define DEBUG_TIMER ;
 // Writing ADC1 result into a_data_point_t
-#define DEBUG_ADC1_CONV ;//DEBUG2
+#define DEBUG_ADC2_CONV ;
 
 #endif /* INC_CONFIG_H_ */
