@@ -27,15 +27,15 @@ HAL_StatusTypeDef adxl_init(SPI_HandleTypeDef *hspi)
 
 	if (spi_rx_buf[0] != 0xAD)
 	{
-		printf("WARNING: adxl_init: Incorrect DEVID_AD (Expected: 0xAD, Received: %x)\r\n", spi_rx_buf[0]);
+		printf("(%lu) WARNING: adxl_init: Incorrect DEVID_AD (Expected: 0xAD, Received: %x)\r\n", HAL_GetTick(), spi_rx_buf[0]);
 	}
 	if (spi_rx_buf[1] != 0x1D)
 	{
-		printf("WARNING: adxl_init: Incorrect DEVID_MST (Expected: 0x1D, Received: %x)\r\n", spi_rx_buf[1]);
+		printf("(%lu) WARNING: adxl_init: Incorrect DEVID_MST (Expected: 0x1D, Received: %x)\r\n", HAL_GetTick(), spi_rx_buf[1]);
 	}
 	if (spi_rx_buf[2] != 0xED)
 	{
-		printf("WARNING: adxl_init: Incorrect PARTID (Expected: 0xED, Received: %x)\r\n", spi_rx_buf[2]);
+		printf("(%lu) WARNING: adxl_init: Incorrect PARTID (Expected: 0xED, Received: %x)\r\n", HAL_GetTick(), spi_rx_buf[2]);
 	}
 
 	// Filter
