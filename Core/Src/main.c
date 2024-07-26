@@ -32,12 +32,6 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
-
-#define BUFFER_FLAG_USE_BUFFER_2 (1 << 0)
-#define BUFFER_FLAG_SAVE_BUFFER_1 (1 << 1)
-#define BUFFER_FLAG_SAVE_BUFFER_2 (1 << 2)
-#define BUFFER_FLAG_OVERFLOW_BUFFER_1 (1 << 3)
-#define BUFFER_FLAG_OVERFLOW_BUFFER_2 (1 << 4)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -47,8 +41,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
-ADC_HandleTypeDef hadc2;
-DMA_HandleTypeDef hdma_adc2;
+DMA_HandleTypeDef hdma_adc1;
 
 SD_HandleTypeDef hsd1;
 DMA_HandleTypeDef hdma_sdmmc1_rx;
@@ -71,8 +64,16 @@ volatile a_data_point_t a_buffer_1[A_BUFFER_LEN];
 volatile a_data_point_t a_buffer_2[A_BUFFER_LEN];
 volatile p_data_point_t p_buffer_1[P_BUFFER_LEN];
 volatile p_data_point_t p_buffer_2[P_BUFFER_LEN];
-volatile uint8_t a_buffer_flags = 0;
-volatile uint8_t p_buffer_flags = 0;
+
+volatile uint8_t flag_use_a_buffer_2 = 0;
+volatile uint8_t flag_save_a_buffer_1 = 0;
+volatile uint8_t flag_save_a_buffer_2 = 0;
+volatile uint8_t flag_overflow_a_buffer = 0;
+volatile uint8_t flag_use_p_buffer_2 = 0;
+volatile uint8_t flag_save_p_buffer_1 = 0;
+volatile uint8_t flag_save_p_buffer_2 = 0;
+volatile uint8_t flag_overflow_p_buffer = 0;
+
 volatile uint32_t a_write_index = 0;
 volatile uint32_t p_write_index = 0;
 
@@ -83,12 +84,11 @@ const char *str_sd_log_error = "ERROR: sd_flush_log failed\r\n";
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
-static void MX_ADC1_Init(void);
 static void MX_SDMMC1_SD_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_TIM2_Init(void);
-static void MX_ADC2_Init(void);
+static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
 void switch_double_buffers(volatile uint8_t*);
 void a_buffer_write_inc(void);
@@ -97,6 +97,25 @@ void p_buffer_write_inc(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+uint32_t ch_max[9];
+void log_buffer(volatile a_data_point_t buf[])
+{
+	for (uint32_t i = 0; i < 4096; i++)
+	{
+		for (uint8_t ch = 0; ch < PIEZO_COUNT; ch++)
+		{
+			if (buf[i].a_piezo[ch] > ch_max[ch])
+			{
+				ch_max[ch] = buf[i].a_piezo[ch];
+			}
+		}
+	}
+	for (uint8_t ch = 0; ch < PIEZO_COUNT; ch++)
+	{
+		printf("%hu (%lu)\t", buf[0].a_piezo[ch], ch_max[ch]);
+	}
+	printf("\r\n");
+}
 /* USER CODE END 0 */
 
 /**
@@ -105,7 +124,6 @@ void p_buffer_write_inc(void);
  */
 int main(void)
 {
-
 	/* USER CODE BEGIN 1 */
 
 	/* USER CODE END 1 */
@@ -129,17 +147,17 @@ int main(void)
 	/* Initialize all configured peripherals */
 	MX_GPIO_Init();
 	MX_DMA_Init();
-	MX_ADC1_Init();
 	MX_SDMMC1_SD_Init();
 	MX_SPI1_Init();
 	MX_FATFS_Init();
 	MX_USART3_UART_Init();
 	MX_TIM2_Init();
-	MX_ADC2_Init();
+	MX_ADC1_Init();
 	/* USER CODE BEGIN 2 */
 	HAL_Delay(1);
 
 	printf("(%lu) Booting...\r\n", HAL_GetTick());
+	printf("(%lu) PIEZO_COUNT=%u\r\n", HAL_GetTick(), PIEZO_COUNT);
 
 	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
@@ -162,16 +180,10 @@ int main(void)
 		Error_Handler();
 	}
 
-	// Start BOD ADC
-	if (HAL_ADC_Start_IT(&hadc1) != HAL_OK)
-	{
-		printf("(%lu) ERROR: main: ADC1 HAL_ADC_Start_IT failed\r\n", HAL_GetTick());
-		Error_Handler();
-	}
 	// Start piezo ADC
-	if (HAL_ADC_Start_DMA(&hadc2, (uint32_t*)adc2_dma_buffer, PIEZO_COUNT) != HAL_OK)
+	if (HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc2_dma_buffer, PIEZO_COUNT) != HAL_OK)
 	{
-		printf("(%lu) ERROR: main: ADC2 HAL_ADC_Start_DMA failed\r\n", HAL_GetTick());
+		printf("(%lu) ERROR: main: ADC1 HAL_ADC_Start_DMA failed\r\n", HAL_GetTick());
 		Error_Handler();
 	}
 	// Start data capture timer
@@ -193,40 +205,38 @@ int main(void)
 
 		/* USER CODE BEGIN 3 */
 		// If a_buffer_1 is ready to save
-		if (a_buffer_flags & BUFFER_FLAG_SAVE_BUFFER_1)
+		if (flag_save_a_buffer_1)
 		{
 			DEBUG_A_BUFFER_1_SD
 			if (sd_log_a_data(a_buffer_1, sizeof(a_buffer_1)) != HAL_OK)
 			{
 				Error_Handler();
 			}
+			log_buffer(a_buffer_1);
 			// Flag a_buffer_1 as saved
-			a_buffer_flags &= ~BUFFER_FLAG_SAVE_BUFFER_1;
+			flag_save_a_buffer_1 = 0;
 			DEBUG_A_BUFFER_1_SD
 		}
-		if (a_buffer_flags & BUFFER_FLAG_OVERFLOW_BUFFER_1)
-		{
-			printf("(%lu) WARNING: main: a_buffer_1 overflow", HAL_GetTick());
-		}
 		// If a_buffer_2 is ready to save
-		if (a_buffer_flags & BUFFER_FLAG_SAVE_BUFFER_2)
+		if (flag_save_a_buffer_2)
 		{
 			DEBUG_A_BUFFER_2_SD
 			if (sd_log_a_data(a_buffer_2, sizeof(a_buffer_2)) != HAL_OK)
 			{
 				Error_Handler();
 			}
+			log_buffer(a_buffer_2);
 			// Flag a_buffer_2 as saved
-			a_buffer_flags &= ~BUFFER_FLAG_SAVE_BUFFER_2;
+			flag_save_a_buffer_2 = 0;
 			DEBUG_A_BUFFER_2_SD
 		}
-		if (a_buffer_flags & BUFFER_FLAG_OVERFLOW_BUFFER_2)
+		if (flag_overflow_a_buffer)
 		{
-			printf("(%lu) WARNING: main: a_buffer_2 overflow", HAL_GetTick());
+			printf("(%lu) WARNING: main: a_buffer overflow\r\n", HAL_GetTick());
 		}
 
 		// If p_buffer_1 is ready to save
-		if (p_buffer_flags & BUFFER_FLAG_SAVE_BUFFER_1)
+		if (flag_save_p_buffer_1)
 		{
 			DEBUG_P_BUFFER_1_SD
 			if (sd_log_p_data(p_buffer_1, sizeof(p_buffer_1)) != HAL_OK)
@@ -234,28 +244,25 @@ int main(void)
 				Error_Handler();
 			}
 			// Flag p_buffer_1 as saved
-			p_buffer_flags &= ~BUFFER_FLAG_SAVE_BUFFER_1;
+			flag_save_p_buffer_1 = 0;
 			DEBUG_P_BUFFER_1_SD
 		}
-		if (p_buffer_flags & BUFFER_FLAG_OVERFLOW_BUFFER_1)
-		{
-			printf("(%lu) WARNING: main: p_buffer_1 overflow", HAL_GetTick());
-		}
 		// If p_buffer_2 is ready to save
-		if (p_buffer_flags & BUFFER_FLAG_SAVE_BUFFER_2)
+		if (flag_save_p_buffer_2)
 		{
 			DEBUG_P_BUFFER_2_SD
 			if (sd_log_p_data(p_buffer_2, sizeof(p_buffer_2)) != HAL_OK)
 			{
 				Error_Handler();
 			}
+			// TODO: printf 9 chs
 			// Flag p_buffer_2 as saved
-			p_buffer_flags &= ~BUFFER_FLAG_SAVE_BUFFER_2;
+			flag_save_p_buffer_2 = 0;
 			DEBUG_P_BUFFER_2_SD
 		}
-		if (p_buffer_flags & BUFFER_FLAG_OVERFLOW_BUFFER_2)
+		if (flag_overflow_p_buffer)
 		{
-			printf("(%lu) WARNING: main: p_buffer_2 overflow", HAL_GetTick());
+			printf("(%lu) WARNING: main: p_buffer overflow\r\n", HAL_GetTick());
 		}
 
 		if (sd_flush_log() != HAL_OK)
@@ -265,6 +272,7 @@ int main(void)
 
 		if (bod_active)
 		{
+			// f_close(&SDFile);
 			// __disable_irq();
 			// while (1)
 			// 	;
@@ -279,15 +287,15 @@ int main(void)
 
 	HAL_TIM_Base_Stop_IT(&htim2);
 	HAL_ADC_Stop_IT(&hadc1);
-	HAL_ADC_Stop_IT(&hadc2);
+	// HAL_ADC_Stop_IT(&hadc2);
 
 	// Save remaining data
-	volatile a_data_point_t *a_buffer_current = (a_buffer_flags & BUFFER_FLAG_USE_BUFFER_2) ? a_buffer_2 : a_buffer_1;
+	volatile a_data_point_t *a_buffer_current = flag_use_a_buffer_2 ? a_buffer_2 : a_buffer_1;
 	if (sd_log_a_data(a_buffer_current, a_write_index * sizeof(a_data_point_t)) != HAL_OK)
 	{
 		Error_Handler();
 	}
-	volatile p_data_point_t *p_buffer_current = (p_buffer_flags & BUFFER_FLAG_USE_BUFFER_2) ? p_buffer_2 : p_buffer_1;
+	volatile p_data_point_t *p_buffer_current = flag_use_p_buffer_2 ? p_buffer_2 : p_buffer_1;
 	if (sd_log_p_data(p_buffer_current, p_write_index * sizeof(p_data_point_t)) != HAL_OK)
 	{
 		Error_Handler();
@@ -373,7 +381,6 @@ static void MX_ADC1_Init(void)
 
 	/* USER CODE END ADC1_Init 0 */
 
-	ADC_AnalogWDGConfTypeDef AnalogWDGConfig = { 0 };
 	ADC_ChannelConfTypeDef sConfig = { 0 };
 
 	/* USER CODE BEGIN ADC1_Init 1 */
@@ -391,92 +398,10 @@ static void MX_ADC1_Init(void)
 	hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
 	hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T2_TRGO;
 	hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-	hadc1.Init.NbrOfConversion = 1;
-	hadc1.Init.DMAContinuousRequests = DISABLE;
+	hadc1.Init.NbrOfConversion = 5;
+	hadc1.Init.DMAContinuousRequests = ENABLE;
 	hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
 	if (HAL_ADC_Init(&hadc1) != HAL_OK)
-	{
-		Error_Handler();
-	}
-
-	/** Configure the analog watchdog
-	 */
-	AnalogWDGConfig.WatchdogMode = ADC_ANALOGWATCHDOG_ALL_REG;
-	AnalogWDGConfig.HighThreshold = 4095;
-	AnalogWDGConfig.LowThreshold = 1000;
-	AnalogWDGConfig.ITMode = ENABLE;
-	if (HAL_ADC_AnalogWDGConfig(&hadc1, &AnalogWDGConfig) != HAL_OK)
-	{
-		Error_Handler();
-	}
-
-	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
-	 */
-	sConfig.Channel = ADC_CHANNEL_VBAT;
-	sConfig.Rank = ADC_REGULAR_RANK_1;
-	sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
-	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
-	{
-		Error_Handler();
-	}
-	/* USER CODE BEGIN ADC1_Init 2 */
-
-	/* USER CODE END ADC1_Init 2 */
-
-}
-
-/**
- * @brief ADC2 Initialization Function
- * @param None
- * @retval None
- */
-static void MX_ADC2_Init(void)
-{
-
-	/* USER CODE BEGIN ADC2_Init 0 */
-
-	/* USER CODE END ADC2_Init 0 */
-
-	ADC_ChannelConfTypeDef sConfig = { 0 };
-
-	/* USER CODE BEGIN ADC2_Init 1 */
-
-	/* USER CODE END ADC2_Init 1 */
-
-	/** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion)
-	 */
-	hadc2.Instance = ADC2;
-	hadc2.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV2;
-	hadc2.Init.Resolution = ADC_RESOLUTION_12B;
-	hadc2.Init.ScanConvMode = ADC_SCAN_ENABLE;
-	hadc2.Init.ContinuousConvMode = DISABLE;
-	hadc2.Init.DiscontinuousConvMode = DISABLE;
-	hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
-	hadc2.Init.ExternalTrigConv = ADC_EXTERNALTRIGCONV_T2_TRGO;
-	hadc2.Init.DataAlign = ADC_DATAALIGN_RIGHT;
-	hadc2.Init.NbrOfConversion = 3;
-	hadc2.Init.DMAContinuousRequests = ENABLE;
-	hadc2.Init.EOCSelection = ADC_EOC_SEQ_CONV;
-	if (HAL_ADC_Init(&hadc2) != HAL_OK)
-	{
-		Error_Handler();
-	}
-
-	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
-	 */
-	sConfig.Channel = ADC_CHANNEL_0;
-	sConfig.Rank = ADC_REGULAR_RANK_1;
-	sConfig.SamplingTime = ADC_SAMPLETIME_144CYCLES;
-	if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
-	{
-		Error_Handler();
-	}
-
-	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
-	 */
-	sConfig.Channel = ADC_CHANNEL_3;
-	sConfig.Rank = ADC_REGULAR_RANK_2;
-	if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
 	{
 		Error_Handler();
 	}
@@ -484,14 +409,51 @@ static void MX_ADC2_Init(void)
 	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
 	 */
 	sConfig.Channel = ADC_CHANNEL_4;
-	sConfig.Rank = ADC_REGULAR_RANK_3;
-	if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
+	sConfig.Rank = ADC_REGULAR_RANK_1;
+	sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
 	{
 		Error_Handler();
 	}
-	/* USER CODE BEGIN ADC2_Init 2 */
 
-	/* USER CODE END ADC2_Init 2 */
+	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+	 */
+	sConfig.Channel = ADC_CHANNEL_9;
+	sConfig.Rank = ADC_REGULAR_RANK_2;
+	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+	{
+		Error_Handler();
+	}
+
+	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+	 */
+	sConfig.Channel = ADC_CHANNEL_12;
+	sConfig.Rank = ADC_REGULAR_RANK_3;
+	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+	{
+		Error_Handler();
+	}
+
+	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+	 */
+	sConfig.Channel = ADC_CHANNEL_6;
+	sConfig.Rank = ADC_REGULAR_RANK_4;
+	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+	{
+		Error_Handler();
+	}
+
+	/** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
+	 */
+	sConfig.Channel = ADC_CHANNEL_13;
+	sConfig.Rank = ADC_REGULAR_RANK_5;
+	if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	/* USER CODE BEGIN ADC1_Init 2 */
+
+	/* USER CODE END ADC1_Init 2 */
 
 }
 
@@ -653,9 +615,9 @@ static void MX_DMA_Init(void)
 	__HAL_RCC_DMA2_CLK_ENABLE();
 
 	/* DMA interrupt init */
-	/* DMA2_Stream2_IRQn interrupt configuration */
-	HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, 0, 0);
-	HAL_NVIC_EnableIRQ(DMA2_Stream2_IRQn);
+	/* DMA2_Stream0_IRQn interrupt configuration */
+	HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
+	HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
 	/* DMA2_Stream3_IRQn interrupt configuration */
 	HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 0, 0);
 	HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
@@ -721,12 +683,6 @@ static void MX_GPIO_Init(void)
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
 	GPIO_InitStruct.Alternate = GPIO_AF11_ETH;
-	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-	/*Configure GPIO pin : PA3 */
-	GPIO_InitStruct.Pin = GPIO_PIN_3;
-	GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 	/*Configure GPIO pins : LD1_Pin LD3_Pin LD2_Pin */
@@ -798,13 +754,13 @@ static void MX_GPIO_Init(void)
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
 	HAL_GPIO_Init(SPI1_CS_GPIO_Port, &GPIO_InitStruct);
 
-	/*Configure GPIO pins : RMII_TX_EN_Pin RMII_TXD0_Pin */
-	GPIO_InitStruct.Pin = RMII_TX_EN_Pin | RMII_TXD0_Pin;
+	/*Configure GPIO pin : RMII_TXD0_Pin */
+	GPIO_InitStruct.Pin = RMII_TXD0_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
 	GPIO_InitStruct.Alternate = GPIO_AF11_ETH;
-	HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
+	HAL_GPIO_Init(RMII_TXD0_GPIO_Port, &GPIO_InitStruct);
 
 	/* USER CODE BEGIN MX_GPIO_Init_2 */
 	/* USER CODE END MX_GPIO_Init_2 */
@@ -830,40 +786,40 @@ PUTCHAR_PROTOTYPE
 	return ch;
 }
 
-void switch_double_buffers(volatile uint8_t *buffer_flags)
+void switch_buffers(volatile uint8_t *flag_use_buffer_2, volatile uint8_t *flag_save_buffer_1, volatile uint8_t *flag_save_buffer_2, volatile uint8_t *flag_overflow)
 {
 	// If buffer_2 has been filled
-	if (*buffer_flags & BUFFER_FLAG_USE_BUFFER_2)
+	if (*flag_use_buffer_2)
 	{
 		// If buffer_1 has been emptied
-		if ((*buffer_flags & BUFFER_FLAG_SAVE_BUFFER_1) == 0)
+		if (!*flag_save_buffer_1)
 		{
 			// buffer_2 full
-			*buffer_flags |= BUFFER_FLAG_SAVE_BUFFER_2;
+			*flag_save_buffer_2 = 1;
 			// Reset buffer_1 to use
-			*buffer_flags &= ~BUFFER_FLAG_USE_BUFFER_2;
+			*flag_use_buffer_2 = 0;
 		}
 		else
 		{
 			// Both buffers are full, flag as overflow
-			*buffer_flags |= BUFFER_FLAG_OVERFLOW_BUFFER_2;
+			*flag_overflow = 1;
 		}
 	}
 	// If buffer_1 has been filled
 	else
 	{
 		// If buffer_2 has been emptied
-		if ((*buffer_flags & BUFFER_FLAG_SAVE_BUFFER_2) == 0)
+		if (!*flag_save_buffer_2)
 		{
 			// buffer_1 full
-			*buffer_flags |= BUFFER_FLAG_SAVE_BUFFER_1;
+			*flag_save_buffer_1 = 1;
 			// Reset buffer_2 to use
-			*buffer_flags |= BUFFER_FLAG_USE_BUFFER_2;
+			*flag_use_buffer_2 = 1;
 		}
 		else
 		{
 			// Both buffers are full, flag as overflow
-			*buffer_flags |= BUFFER_FLAG_OVERFLOW_BUFFER_1;
+			*flag_overflow = 1;
 		}
 	}
 }
@@ -875,10 +831,10 @@ void a_buffer_write_inc()
 	{
 		// Switch buffers
 		a_write_index = 0;
-		switch_double_buffers(&a_buffer_flags);
+		switch_buffers(&flag_use_a_buffer_2, &flag_save_a_buffer_1, &flag_save_a_buffer_2, &flag_overflow_a_buffer);
 	}
 
-	volatile a_data_point_t *a_buffer_current = (a_buffer_flags & BUFFER_FLAG_USE_BUFFER_2) ? a_buffer_2 : a_buffer_1;
+	volatile a_data_point_t *a_buffer_current = flag_use_a_buffer_2 ? a_buffer_2 : a_buffer_1;
 	a_buffer_current[a_write_index].timestamp = ticks_counter;
 	a_buffer_current[a_write_index].complete = A_COMPLETE_TIMESTAMP;
 	a_buffer_current[a_write_index].x_mems1 = a_write_index;
@@ -891,10 +847,10 @@ void p_buffer_write_inc()
 	{
 		// Switch buffers
 		p_write_index = 0;
-		switch_double_buffers(&p_buffer_flags);
+		switch_buffers(&flag_use_p_buffer_2, &flag_save_p_buffer_1, &flag_save_p_buffer_2, &flag_overflow_p_buffer);
 	}
 
-	volatile p_data_point_t *p_buffer_current = (p_buffer_flags & BUFFER_FLAG_USE_BUFFER_2) ? p_buffer_2 : p_buffer_1;
+	volatile p_data_point_t *p_buffer_current = flag_use_p_buffer_2 ? p_buffer_2 : p_buffer_1;
 	p_buffer_current[p_write_index].timestamp = ticks_counter;
 	p_buffer_current[p_write_index].complete = P_COMPLETE_TIMESTAMP;
 	p_buffer_current[p_write_index].gps_time = p_write_index;
@@ -909,7 +865,7 @@ void Timer2_Handler(void)
 		// TODO: ADXL sync
 		if (ticks_counter % 100 == 0)
 		{
-			volatile p_data_point_t *p_buffer_current = (p_buffer_flags & BUFFER_FLAG_USE_BUFFER_2) ? p_buffer_2 : p_buffer_1;
+			volatile p_data_point_t *p_buffer_current = flag_use_p_buffer_2 ? p_buffer_2 : p_buffer_1;
 			p_buffer_current[p_write_index].complete |= P_COMPLETE_GPS;
 			p_buffer_write_inc();
 		}
@@ -923,11 +879,11 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 	if (capture_running)
 	{
 		// ADC for piezo sensors
-		if (hadc->Instance == ADC2)
+		if (hadc->Instance == ADC1)
 		{
 			DEBUG_ADC2_CONV
 			// Write to a_buffer_2 if a_buffer_1 is full
-			volatile a_data_point_t *a_buffer_current = (a_buffer_flags & BUFFER_FLAG_USE_BUFFER_2) ? a_buffer_2 : a_buffer_1;
+			volatile a_data_point_t *a_buffer_current = flag_use_a_buffer_2 ? a_buffer_2 : a_buffer_1;
 			memcpy((void*)a_buffer_current[a_write_index].a_piezo, (void*)adc2_dma_buffer, PIEZO_COUNT * sizeof(uint16_t));
 			a_buffer_current[a_write_index].complete |= A_COMPLETE_PZ;
 			DEBUG_ADC2_CONV

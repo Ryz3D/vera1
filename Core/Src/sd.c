@@ -92,13 +92,15 @@ HAL_StatusTypeDef sd_init(uint8_t do_format)
 	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
 	HAL_Delay(250);
 
-	for (int32_t i = 0; i < file_num; i++)
-	{
-		HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
-		HAL_Delay(250);
-		HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
-		HAL_Delay(250);
-	}
+	/*
+	 for (int32_t i = 0; i < file_num; i++)
+	 {
+	 HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
+	 HAL_Delay(250);
+	 HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
+	 HAL_Delay(250);
+	 }
+	 */
 
 	if (sd_touch_file(a_file_path) != HAL_OK)
 	{

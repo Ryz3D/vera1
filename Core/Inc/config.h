@@ -11,7 +11,7 @@
 #define A_BUFFER_LEN 4096
 #define P_BUFFER_LEN 128
 
-#define PIEZO_COUNT 3
+#define PIEZO_COUNT 5
 
 #define USE_ADC3_PZ2 0
 
