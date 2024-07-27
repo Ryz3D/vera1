@@ -32,6 +32,9 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
+
+#define A_BUFFER_CURRENT (flag_use_a_buffer_2 ? a_buffer_2 : a_buffer_1)
+#define P_BUFFER_CURRENT (flag_use_p_buffer_2 ? p_buffer_2 : p_buffer_1)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -56,14 +59,16 @@ UART_HandleTypeDef huart3;
 /* USER CODE BEGIN PV */
 volatile uint8_t capture_running = 1;
 volatile uint32_t ticks_counter = 0;
-volatile uint8_t bod_active = 0;
 
-volatile uint16_t adc2_dma_buffer[PIEZO_COUNT];
+volatile uint16_t pz_dma_buffer[PIEZO_COUNT];
 
 volatile a_data_point_t a_buffer_1[A_BUFFER_LEN];
 volatile a_data_point_t a_buffer_2[A_BUFFER_LEN];
 volatile p_data_point_t p_buffer_1[P_BUFFER_LEN];
 volatile p_data_point_t p_buffer_2[P_BUFFER_LEN];
+
+volatile uint32_t a_write_index = 0;
+volatile uint32_t p_write_index = 0;
 
 volatile uint8_t flag_use_a_buffer_2 = 0;
 volatile uint8_t flag_save_a_buffer_1 = 0;
@@ -74,8 +79,9 @@ volatile uint8_t flag_save_p_buffer_1 = 0;
 volatile uint8_t flag_save_p_buffer_2 = 0;
 volatile uint8_t flag_overflow_p_buffer = 0;
 
-volatile uint32_t a_write_index = 0;
-volatile uint32_t p_write_index = 0;
+volatile uint8_t flag_complete_a_mems = 0;
+volatile uint8_t flag_complete_a_pz = 0;
+volatile uint8_t flag_complete_p_gps = 0;
 
 const char *str_sd_log_error = "ERROR: sd_flush_log failed\r\n";
 /* USER CODE END PV */
@@ -165,7 +171,7 @@ int main(void)
 	}
 
 	// Start piezo ADC
-	if (HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adc2_dma_buffer, PIEZO_COUNT) != HAL_OK)
+	if (HAL_ADC_Start_DMA(&hadc1, (uint32_t*)pz_dma_buffer, PIEZO_COUNT) != HAL_OK)
 	{
 		printf("(%lu) ERROR: main: ADC1 HAL_ADC_Start_DMA failed\r\n", HAL_GetTick());
 		Error_Handler();
@@ -251,14 +257,6 @@ int main(void)
 			HAL_UART_Transmit(&huart3, (const uint8_t*)str_sd_log_error, strlen(str_sd_log_error), 1000);
 		}
 
-		if (bod_active)
-		{
-			// f_close(&SDFile);
-			// __disable_irq();
-			// while (1)
-			// 	;
-		}
-
 		if (HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin) == GPIO_PIN_SET)
 		{
 			capture_running = 0;
@@ -268,16 +266,13 @@ int main(void)
 
 	HAL_TIM_Base_Stop_IT(&htim2);
 	HAL_ADC_Stop_IT(&hadc1);
-	// HAL_ADC_Stop_IT(&hadc2);
 
 	// Save remaining data
-	volatile a_data_point_t *a_buffer_current = flag_use_a_buffer_2 ? a_buffer_2 : a_buffer_1;
-	if (sd_log_a_data(a_buffer_current, a_write_index * sizeof(a_data_point_t)) != HAL_OK)
+	if (sd_log_a_data(A_BUFFER_CURRENT, a_write_index * sizeof(a_data_point_t)) != HAL_OK)
 	{
 		Error_Handler();
 	}
-	volatile p_data_point_t *p_buffer_current = flag_use_p_buffer_2 ? p_buffer_2 : p_buffer_1;
-	if (sd_log_p_data(p_buffer_current, p_write_index * sizeof(p_data_point_t)) != HAL_OK)
+	if (sd_log_p_data(P_BUFFER_CURRENT, p_write_index * sizeof(p_data_point_t)) != HAL_OK)
 	{
 		Error_Handler();
 	}
@@ -807,6 +802,9 @@ void switch_buffers(volatile uint8_t *flag_use_buffer_2, volatile uint8_t *flag_
 
 void a_buffer_write_inc()
 {
+	// Set complete bits of last data point
+	A_BUFFER_CURRENT[a_write_index].complete |= (1 << A_COMPLETE_TIMESTAMP) | (flag_complete_a_mems << A_COMPLETE_MEMS) | (flag_complete_a_pz << A_COMPLETE_PZ);
+
 	// If next index would overflow
 	if (++a_write_index >= A_BUFFER_LEN)
 	{
@@ -815,14 +813,15 @@ void a_buffer_write_inc()
 		switch_buffers(&flag_use_a_buffer_2, &flag_save_a_buffer_1, &flag_save_a_buffer_2, &flag_overflow_a_buffer);
 	}
 
-	volatile a_data_point_t *a_buffer_current = flag_use_a_buffer_2 ? a_buffer_2 : a_buffer_1;
-	a_buffer_current[a_write_index].timestamp = ticks_counter;
-	a_buffer_current[a_write_index].complete = A_COMPLETE_TIMESTAMP;
-	a_buffer_current[a_write_index].x_mems1 = a_write_index;
+	A_BUFFER_CURRENT[a_write_index].timestamp = ticks_counter;
+	A_BUFFER_CURRENT[a_write_index].x_mems1 = a_write_index;
 }
 
 void p_buffer_write_inc()
 {
+	// Set complete bits of last data point
+	P_BUFFER_CURRENT[p_write_index].complete |= (1 << P_COMPLETE_TIMESTAMP) | (flag_complete_p_gps << P_COMPLETE_GPS);
+
 	// If next index would overflow
 	if (++p_write_index >= P_BUFFER_LEN)
 	{
@@ -831,10 +830,8 @@ void p_buffer_write_inc()
 		switch_buffers(&flag_use_p_buffer_2, &flag_save_p_buffer_1, &flag_save_p_buffer_2, &flag_overflow_p_buffer);
 	}
 
-	volatile p_data_point_t *p_buffer_current = flag_use_p_buffer_2 ? p_buffer_2 : p_buffer_1;
-	p_buffer_current[p_write_index].timestamp = ticks_counter;
-	p_buffer_current[p_write_index].complete = P_COMPLETE_TIMESTAMP;
-	p_buffer_current[p_write_index].gps_time = p_write_index;
+	P_BUFFER_CURRENT[p_write_index].timestamp = ticks_counter;
+	P_BUFFER_CURRENT[p_write_index].gps_time = p_write_index;
 }
 
 void Timer2_Handler(void)
@@ -851,8 +848,7 @@ void Timer2_Handler(void)
 		}
 		if (ticks_counter % 100 == 0)
 		{
-			volatile p_data_point_t *p_buffer_current = flag_use_p_buffer_2 ? p_buffer_2 : p_buffer_1;
-			p_buffer_current[p_write_index].complete |= P_COMPLETE_GPS;
+			flag_complete_p_gps = 1;
 			p_buffer_write_inc();
 		}
 	}
@@ -864,30 +860,16 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 {
 	if (capture_running)
 	{
-		// ADC for piezo sensors
+		// ADC for piezos
 		if (hadc->Instance == ADC1)
 		{
 			DEBUG_ADC2_CONV
-			// Write to a_buffer_2 if a_buffer_1 is full
-			volatile a_data_point_t *a_buffer_current = flag_use_a_buffer_2 ? a_buffer_2 : a_buffer_1;
-			memcpy((void*)a_buffer_current[a_write_index].a_piezo, (void*)adc2_dma_buffer, PIEZO_COUNT * sizeof(uint16_t));
-			a_buffer_current[a_write_index].complete |= A_COMPLETE_PZ;
+			// Copy data from DMA buffer to current data point
+			memcpy((void*)A_BUFFER_CURRENT[a_write_index].a_piezo, (void*)pz_dma_buffer, PIEZO_COUNT * sizeof(uint16_t));
+			flag_complete_a_mems = 1;
 			DEBUG_ADC2_CONV
 		}
 	}
-}
-
-void HAL_ADC_LevelOutOfWindowCallback(ADC_HandleTypeDef *hadc)
-{
-	bod_active = 1;
-	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-	while (1)
-	{
-		DEBUG1
-	}
-	// printf("(%lu) BOD\r\n", HAL_GetTick());
-	// sd_flush_log();
-	// sd_uninit();
 }
 /* USER CODE END 4 */
 
