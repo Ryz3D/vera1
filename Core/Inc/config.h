@@ -8,12 +8,10 @@
 #ifndef INC_CONFIG_H_
 #define INC_CONFIG_H_
 
+#define OVERSAMPLING_RATIO 1
+#define PIEZO_COUNT 5
 #define A_BUFFER_LEN 4096
 #define P_BUFFER_LEN 128
-
-#define PIEZO_COUNT 5
-
-#define USE_ADC3_PZ2 0
 
 // Reserved for BOD testing
 #define DEBUG1 HAL_GPIO_TogglePin(Debug1_GPIO_Port, Debug1_Pin);

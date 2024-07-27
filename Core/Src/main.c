@@ -97,25 +97,6 @@ void p_buffer_write_inc(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-uint32_t ch_max[9];
-void log_buffer(volatile a_data_point_t buf[])
-{
-	for (uint32_t i = 0; i < 4096; i++)
-	{
-		for (uint8_t ch = 0; ch < PIEZO_COUNT; ch++)
-		{
-			if (buf[i].a_piezo[ch] > ch_max[ch])
-			{
-				ch_max[ch] = buf[i].a_piezo[ch];
-			}
-		}
-	}
-	for (uint8_t ch = 0; ch < PIEZO_COUNT; ch++)
-	{
-		printf("%hu (%lu)\t", buf[0].a_piezo[ch], ch_max[ch]);
-	}
-	printf("\r\n");
-}
 /* USER CODE END 0 */
 
 /**
@@ -125,7 +106,6 @@ void log_buffer(volatile a_data_point_t buf[])
 int main(void)
 {
 	/* USER CODE BEGIN 1 */
-
 	/* USER CODE END 1 */
 
 	/* MCU Configuration--------------------------------------------------------*/
@@ -157,7 +137,11 @@ int main(void)
 	HAL_Delay(1);
 
 	printf("(%lu) Booting...\r\n", HAL_GetTick());
-	printf("(%lu) PIEZO_COUNT=%u\r\n", HAL_GetTick(), PIEZO_COUNT);
+	printf("(%lu) Config: ", HAL_GetTick());
+	printf("OVERSAMPLING_RATIO=%i ", OVERSAMPLING_RATIO);
+	printf("PIEZO_COUNT=%i ", PIEZO_COUNT);
+	printf("A_BUFFER_LEN=%i ", A_BUFFER_LEN);
+	printf("P_BUFFER_LEN=%i\r\n", P_BUFFER_LEN);
 
 	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
@@ -212,7 +196,6 @@ int main(void)
 			{
 				Error_Handler();
 			}
-			log_buffer(a_buffer_1);
 			// Flag a_buffer_1 as saved
 			flag_save_a_buffer_1 = 0;
 			DEBUG_A_BUFFER_1_SD
@@ -225,7 +208,6 @@ int main(void)
 			{
 				Error_Handler();
 			}
-			log_buffer(a_buffer_2);
 			// Flag a_buffer_2 as saved
 			flag_save_a_buffer_2 = 0;
 			DEBUG_A_BUFFER_2_SD
@@ -255,7 +237,6 @@ int main(void)
 			{
 				Error_Handler();
 			}
-			// TODO: printf 9 chs
 			// Flag p_buffer_2 as saved
 			flag_save_p_buffer_2 = 0;
 			DEBUG_P_BUFFER_2_SD
@@ -861,8 +842,13 @@ void Timer2_Handler(void)
 	DEBUG_TIMER
 	if (capture_running && ticks_counter > 0)
 	{
-		a_buffer_write_inc();
-		// TODO: ADXL sync
+		// TODO: digital filter
+		if (ticks_counter % OVERSAMPLING_RATIO == 0)
+		{
+			// Increment data point index
+			a_buffer_write_inc();
+			// TODO: ADXL sync
+		}
 		if (ticks_counter % 100 == 0)
 		{
 			volatile p_data_point_t *p_buffer_current = flag_use_p_buffer_2 ? p_buffer_2 : p_buffer_1;
