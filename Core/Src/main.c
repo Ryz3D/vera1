@@ -22,6 +22,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "arm_math.h"
+#include "fir_taps5.h"
+#include "fir.h"
 #include "sd.h"
 /* USER CODE END Includes */
 
@@ -57,6 +60,8 @@ TIM_HandleTypeDef htim2;
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
+FIR_t hfir1;
+
 volatile uint8_t capture_running = 1;
 volatile uint32_t ticks_counter = 0;
 
@@ -96,7 +101,8 @@ static void MX_USART3_UART_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
-void switch_double_buffers(volatile uint8_t*);
+PUTCHAR_PROTOTYPE;
+void switch_buffers(volatile uint8_t *flag_use_buffer_2, volatile uint8_t *flag_save_buffer_1, volatile uint8_t *flag_save_buffer_2, volatile uint8_t *flag_overflow);
 void a_buffer_write_inc(void);
 void p_buffer_write_inc(void);
 /* USER CODE END PFP */
@@ -111,6 +117,7 @@ void p_buffer_write_inc(void);
  */
 int main(void)
 {
+
 	/* USER CODE BEGIN 1 */
 	/* USER CODE END 1 */
 
@@ -165,18 +172,95 @@ int main(void)
 		HAL_Delay(100);
 		HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
 	}
-	if (sd_init(do_format_sd) != HAL_OK)
+	if (SD_Init(do_format_sd) != HAL_OK)
 	{
 		Error_Handler();
 	}
 
-	// Start piezo ADC
+	// Start FIR filter
+	FIR_Init(&hfir1, fir_taps);
+
+	float freqs[400];
+	float amps[400];
+	float delays[400];
+
+	for (uint16_t f_i = 0; f_i < 400; f_i++)
+	{
+		freqs[f_i] = 10 + f_i * 10;
+		amps[f_i] = 0;
+		delays[f_i] = 0;
+	}
+
+	for (uint16_t f_i = 0; f_i < 400; f_i++)
+	{
+		uint32_t sim_t = 0;
+		float a_max = 0;
+		uint8_t delay_set = 0;
+		for (uint16_t iter = 0; iter < 400; iter++)
+		{
+			for (uint8_t i = 0; i < FIR_BLOCK_LEN; i++)
+			{
+				hfir1.In[i] = arm_sin_f32(2.0f * PI * freqs[f_i] / 16000.0f * (float)sim_t);
+				sim_t++;
+			}
+			FIR_Update(&hfir1);
+			for (uint8_t i = 0; i < FIR_BLOCK_LEN; i++)
+			{
+				a_max = hfir1.Out[i] > a_max ? hfir1.Out[i] : a_max;
+				if (a_max > 0.1 && delay_set == 0)
+				{
+					delays[f_i] = (float)sim_t / 16000.0f;
+					delay_set = 1;
+				}
+			}
+		}
+		amps[f_i] = a_max;
+		for (uint8_t i = 0; i < FIR_BLOCK_LEN; i++)
+		{
+			hfir1.In[i] = 0;
+		}
+		for (uint8_t j = 0; j < 10; j++)
+		{
+			FIR_Update(&hfir1);
+		}
+	}
+
+	/*
+	 printf("%f", hfir1.Out[i]);
+	 int16_t k;
+	 if (hfir1.Out[i] < -1.0f)
+	 hfir1.Out[i] = -1.0f;
+	 else if (hfir1.Out[i] > -1.0f)
+	 hfir1.Out[i] = 1.0f;
+	 k = (int16_t)(hfir1.Out[i] * 0xFFF); // 13 bit?, 24 bit -> 0x7FFFFF (do this and bit shift?), 12 bit -> 0x7FF
+	 printf(" (%hi)\r\n", k);
+	 */
+
+	printf("[");
+	for (uint16_t i = 0; i < 400; i++)
+	{
+		printf("(%hu, %.4f)", (uint16_t)freqs[i], amps[i]);
+		if (i < 399)
+			printf(",");
+	}
+	printf("]\r\n\r\n");
+
+	printf("[");
+	for (uint16_t i = 0; i < 400; i++)
+	{
+		printf("(%hu, %.4f)", (uint16_t)freqs[i], delays[i]);
+		if (i < 399)
+			printf(",");
+	}
+	printf("]\r\n\r\n");
+
+// Start piezo ADC
 	if (HAL_ADC_Start_DMA(&hadc1, (uint32_t*)pz_dma_buffer, PIEZO_COUNT) != HAL_OK)
 	{
 		printf("(%lu) ERROR: main: ADC1 HAL_ADC_Start_DMA failed\r\n", HAL_GetTick());
 		Error_Handler();
 	}
-	// Start data capture timer
+// Start data capture timer
 	if (HAL_TIM_Base_Start_IT(&htim2) != HAL_OK)
 	{
 		printf("(%lu) ERROR: main: HAL_TIM_Base_Start_IT failed\r\n", HAL_GetTick());
@@ -198,7 +282,7 @@ int main(void)
 		if (flag_save_a_buffer_1)
 		{
 			DEBUG_A_BUFFER_1_SD
-			if (sd_log_a_data(a_buffer_1, sizeof(a_buffer_1)) != HAL_OK)
+			if (SD_Save_a_data(a_buffer_1, sizeof(a_buffer_1)) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -210,7 +294,7 @@ int main(void)
 		if (flag_save_a_buffer_2)
 		{
 			DEBUG_A_BUFFER_2_SD
-			if (sd_log_a_data(a_buffer_2, sizeof(a_buffer_2)) != HAL_OK)
+			if (SD_Save_a_data(a_buffer_2, sizeof(a_buffer_2)) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -227,7 +311,7 @@ int main(void)
 		if (flag_save_p_buffer_1)
 		{
 			DEBUG_P_BUFFER_1_SD
-			if (sd_log_p_data(p_buffer_1, sizeof(p_buffer_1)) != HAL_OK)
+			if (SD_Save_p_data(p_buffer_1, sizeof(p_buffer_1)) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -239,7 +323,7 @@ int main(void)
 		if (flag_save_p_buffer_2)
 		{
 			DEBUG_P_BUFFER_2_SD
-			if (sd_log_p_data(p_buffer_2, sizeof(p_buffer_2)) != HAL_OK)
+			if (SD_Save_p_data(p_buffer_2, sizeof(p_buffer_2)) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -252,7 +336,7 @@ int main(void)
 			printf("(%lu) WARNING: main: p_buffer overflow\r\n", HAL_GetTick());
 		}
 
-		if (sd_flush_log() != HAL_OK)
+		if (SD_FlushLog() != HAL_OK)
 		{
 			HAL_UART_Transmit(&huart3, (const uint8_t*)str_sd_log_error, strlen(str_sd_log_error), 1000);
 		}
@@ -267,12 +351,12 @@ int main(void)
 	HAL_TIM_Base_Stop_IT(&htim2);
 	HAL_ADC_Stop_IT(&hadc1);
 
-	// Save remaining data
-	if (sd_log_a_data(A_BUFFER_CURRENT, a_write_index * sizeof(a_data_point_t)) != HAL_OK)
+// Save remaining data
+	if (SD_Save_a_data(A_BUFFER_CURRENT, a_write_index * sizeof(a_data_point_t)) != HAL_OK)
 	{
 		Error_Handler();
 	}
-	if (sd_log_p_data(P_BUFFER_CURRENT, p_write_index * sizeof(p_data_point_t)) != HAL_OK)
+	if (SD_Save_p_data(P_BUFFER_CURRENT, p_write_index * sizeof(p_data_point_t)) != HAL_OK)
 	{
 		Error_Handler();
 	}
@@ -280,12 +364,12 @@ int main(void)
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 	printf("(%lu) Capture stopped\r\n", HAL_GetTick());
 
-	if (sd_flush_log() != HAL_OK)
+	if (SD_FlushLog() != HAL_OK)
 	{
 		HAL_UART_Transmit(&huart3, (const uint8_t*)str_sd_log_error, strlen(str_sd_log_error), 1000);
 	}
 
-	sd_uninit();
+	SD_Uninit();
 
 	while (1)
 		;
@@ -522,7 +606,7 @@ static void MX_TIM2_Init(void)
 	htim2.Instance = TIM2;
 	htim2.Init.Prescaler = 0;
 	htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-	htim2.Init.Period = 24000;
+	htim2.Init.Period = 6000;
 	htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
 	htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
 	if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -764,7 +848,7 @@ PUTCHAR_PROTOTYPE
 
 void switch_buffers(volatile uint8_t *flag_use_buffer_2, volatile uint8_t *flag_save_buffer_1, volatile uint8_t *flag_save_buffer_2, volatile uint8_t *flag_overflow)
 {
-	// If buffer_2 has been filled
+// If buffer_2 has been filled
 	if (*flag_use_buffer_2)
 	{
 		// If buffer_1 has been emptied
@@ -781,7 +865,7 @@ void switch_buffers(volatile uint8_t *flag_use_buffer_2, volatile uint8_t *flag_
 			*flag_overflow = 1;
 		}
 	}
-	// If buffer_1 has been filled
+// If buffer_1 has been filled
 	else
 	{
 		// If buffer_2 has been emptied
@@ -802,10 +886,10 @@ void switch_buffers(volatile uint8_t *flag_use_buffer_2, volatile uint8_t *flag_
 
 void a_buffer_write_inc()
 {
-	// Set complete bits of last data point
+// Set complete bits of last data point
 	A_BUFFER_CURRENT[a_write_index].complete |= (1 << A_COMPLETE_TIMESTAMP) | (flag_complete_a_mems << A_COMPLETE_MEMS) | (flag_complete_a_pz << A_COMPLETE_PZ);
 
-	// If next index would overflow
+// If next index would overflow
 	if (++a_write_index >= A_BUFFER_LEN)
 	{
 		// Switch buffers
@@ -819,10 +903,10 @@ void a_buffer_write_inc()
 
 void p_buffer_write_inc()
 {
-	// Set complete bits of last data point
+// Set complete bits of last data point
 	P_BUFFER_CURRENT[p_write_index].complete |= (1 << P_COMPLETE_TIMESTAMP) | (flag_complete_p_gps << P_COMPLETE_GPS);
 
-	// If next index would overflow
+// If next index would overflow
 	if (++p_write_index >= P_BUFFER_LEN)
 	{
 		// Switch buffers
@@ -863,11 +947,15 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 		// ADC for piezos
 		if (hadc->Instance == ADC1)
 		{
-			DEBUG_ADC2_CONV
+			DEBUG_ADC_PZ_CONV
 			// Copy data from DMA buffer to current data point
 			memcpy((void*)A_BUFFER_CURRENT[a_write_index].a_piezo, (void*)pz_dma_buffer, PIEZO_COUNT * sizeof(uint16_t));
+
+			A_BUFFER_CURRENT[a_write_index].a_piezo[0] = 0;
+			A_BUFFER_CURRENT[a_write_index].a_piezo[0] = 0;
+
 			flag_complete_a_mems = 1;
-			DEBUG_ADC2_CONV
+			DEBUG_ADC_PZ_CONV
 		}
 	}
 }
@@ -883,8 +971,8 @@ void Error_Handler(void)
 	/* User can add his own implementation to report the HAL error return state */
 	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
 	printf("(%lu) Fatal Error\r\n", HAL_GetTick());
-	sd_flush_log();
-	sd_uninit();
+	SD_FlushLog();
+	SD_Uninit();
 	__disable_irq();
 	while (1)
 		;

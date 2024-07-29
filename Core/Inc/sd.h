@@ -28,13 +28,13 @@ extern TCHAR log_file_path[];
 extern char sd_log[];
 extern uint32_t sd_log_write_index;
 
-HAL_StatusTypeDef sd_touch_file(TCHAR *path);
-void sd_update_file_paths(void);
+HAL_StatusTypeDef SD_TouchFile(TCHAR *path);
+void SD_UpdateFilepaths(void);
 
-HAL_StatusTypeDef sd_init(uint8_t do_format);
-HAL_StatusTypeDef sd_uninit(void);
-HAL_StatusTypeDef sd_log_a_data(volatile a_data_point_t *a_data_buffer, uint32_t a_data_size);
-HAL_StatusTypeDef sd_log_p_data(volatile p_data_point_t *p_data_buffer, uint32_t p_data_size);
-HAL_StatusTypeDef sd_flush_log(void);
+HAL_StatusTypeDef SD_Init(uint8_t do_format);
+HAL_StatusTypeDef SD_Uninit(void);
+HAL_StatusTypeDef SD_Save_a_data(volatile a_data_point_t *a_data_buffer, uint32_t a_data_size);
+HAL_StatusTypeDef SD_Save_p_data(volatile p_data_point_t *p_data_buffer, uint32_t p_data_size);
+HAL_StatusTypeDef SD_FlushLog(void);
 
 #endif /* INC_SD_H_ */

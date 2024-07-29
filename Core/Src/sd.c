@@ -15,7 +15,7 @@ TCHAR log_file_path[32];
 char sd_log[SD_LOG_LEN];
 uint32_t sd_log_write_index = 0;
 
-HAL_StatusTypeDef sd_touch_file(TCHAR *path)
+HAL_StatusTypeDef SD_TouchFile(TCHAR *path)
 {
 	if (f_open(&SDFile, path, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK)
 	{
@@ -26,14 +26,14 @@ HAL_StatusTypeDef sd_touch_file(TCHAR *path)
 	return HAL_OK;
 }
 
-void sd_update_file_paths(void)
+void SD_UpdateFilepaths(void)
 {
 	sprintf(a_file_path, A_FILE_FORMAT, file_num);
 	sprintf(p_file_path, P_FILE_FORMAT, file_num);
 	sprintf(log_file_path, LOG_FILE_FORMAT, file_num);
 }
 
-HAL_StatusTypeDef sd_init(uint8_t do_format)
+HAL_StatusTypeDef SD_Init(uint8_t do_format)
 {
 	if (HAL_GPIO_ReadPin(uSD_Detect_GPIO_Port, uSD_Detect_Pin) == GPIO_PIN_SET)
 	{
@@ -84,7 +84,7 @@ HAL_StatusTypeDef sd_init(uint8_t do_format)
 	}
 	f_closedir(&dir_root);
 	file_num++;
-	sd_update_file_paths();
+	SD_UpdateFilepaths();
 	printf("(%lu) First files '%s' / '%s'\r\n", HAL_GetTick(), a_file_path, p_file_path);
 
 	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
@@ -100,17 +100,17 @@ HAL_StatusTypeDef sd_init(uint8_t do_format)
 		HAL_Delay(250);
 	}
 
-	if (sd_touch_file(a_file_path) != HAL_OK)
+	if (SD_TouchFile(a_file_path) != HAL_OK)
 	{
 		printf("(%lu) ERROR: sd_init: Accel. file touch failed\r\n", HAL_GetTick());
 		return HAL_ERROR;
 	}
-	if (sd_touch_file(p_file_path) != HAL_OK)
+	if (SD_TouchFile(p_file_path) != HAL_OK)
 	{
 		printf("(%lu) ERROR: sd_init: Pos. file touch failed\r\n", HAL_GetTick());
 		return HAL_ERROR;
 	}
-	if (sd_touch_file(log_file_path) != HAL_OK)
+	if (SD_TouchFile(log_file_path) != HAL_OK)
 	{
 		printf("(%lu) ERROR: sd_init: Log file touch failed\r\n", HAL_GetTick());
 		return HAL_ERROR;
@@ -120,7 +120,7 @@ HAL_StatusTypeDef sd_init(uint8_t do_format)
 	return HAL_OK;
 }
 
-HAL_StatusTypeDef sd_uninit(void)
+HAL_StatusTypeDef SD_Uninit(void)
 {
 	f_close(&SDFile);
 	f_mount(NULL, (TCHAR const*)SDPath, 0);
@@ -128,7 +128,7 @@ HAL_StatusTypeDef sd_uninit(void)
 	return HAL_OK;
 }
 
-HAL_StatusTypeDef sd_log_a_data(volatile a_data_point_t *a_data_buffer, uint32_t a_data_size)
+HAL_StatusTypeDef SD_Save_a_data(volatile a_data_point_t *a_data_buffer, uint32_t a_data_size)
 {
 	if (f_open(&SDFile, a_file_path, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
 	{
@@ -153,7 +153,7 @@ HAL_StatusTypeDef sd_log_a_data(volatile a_data_point_t *a_data_buffer, uint32_t
 	return HAL_OK;
 }
 
-HAL_StatusTypeDef sd_log_p_data(volatile p_data_point_t *p_data_buffer, uint32_t p_data_size)
+HAL_StatusTypeDef SD_Save_p_data(volatile p_data_point_t *p_data_buffer, uint32_t p_data_size)
 {
 	if (f_open(&SDFile, p_file_path, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
 	{
@@ -178,7 +178,7 @@ HAL_StatusTypeDef sd_log_p_data(volatile p_data_point_t *p_data_buffer, uint32_t
 	return HAL_OK;
 }
 
-HAL_StatusTypeDef sd_flush_log(void)
+HAL_StatusTypeDef SD_FlushLog(void)
 {
 	if (sd_log_write_index == 0)
 		return HAL_OK;

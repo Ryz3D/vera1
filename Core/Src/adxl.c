@@ -19,7 +19,7 @@ HAL_StatusTypeDef adxl_init(SPI_HandleTypeDef *hspi)
 	{
 		return res;
 	}
-	const uint8_t spi_rx_buf[3];
+	uint8_t spi_rx_buf[3];
 	if ((res = HAL_SPI_Receive(hspi, spi_rx_buf, sizeof(spi_rx_buf), HAL_MAX_DELAY)) != HAL_OK)
 	{
 		return res;
@@ -73,10 +73,10 @@ HAL_StatusTypeDef adxl_init(SPI_HandleTypeDef *hspi)
 HAL_StatusTypeDef adxl_read(SPI_HandleTypeDef *hspi, int32_t *x, int32_t *y, int32_t *z, uint16_t *temp)
 {
 	// TODO: SPI Interrupt -> call when data is ready (or hardware interrupt on DRDY pin?)
-	const uint8_t spi_buf[] = { 0x06 };
+	uint8_t spi_buf[] = { 0x06 };
 	HAL_SPI_Transmit(hspi, spi_buf, sizeof(spi_buf), HAL_MAX_DELAY);
 
-	const uint8_t spi_rx_buf[12];
+	uint8_t spi_rx_buf[12];
 	HAL_SPI_Receive(hspi, spi_rx_buf, sizeof(spi_rx_buf), HAL_MAX_DELAY);
 
 	if (temp != NULL)
@@ -87,7 +87,7 @@ HAL_StatusTypeDef adxl_read(SPI_HandleTypeDef *hspi, int32_t *x, int32_t *y, int
 		*y = ((uint32_t)spi_rx_buf[5] << 12) | ((uint32_t)spi_rx_buf[6] << 4) | (spi_rx_buf[7] >> 4);
 	if (z != NULL)
 		*z = ((uint32_t)spi_rx_buf[8] << 12) | ((uint32_t)spi_rx_buf[9] << 4) | (spi_rx_buf[10] >> 4);
-	uint8_t fifo = spi_rx_buf[11];
+	// uint8_t fifo = spi_rx_buf[11];
 
 	return HAL_OK;
 }
