@@ -23,7 +23,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "arm_math.h"
-#include "fir_taps5.h"
+#include "fir_taps8_i.h"
 #include "fir.h"
 #include "sd.h"
 /* USER CODE END Includes */
@@ -36,8 +36,7 @@
 /* USER CODE BEGIN PD */
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 
-#define A_BUFFER_CURRENT (flag_use_a_buffer_2 ? a_buffer_2 : a_buffer_1)
-#define P_BUFFER_CURRENT (flag_use_p_buffer_2 ? p_buffer_2 : p_buffer_1)
+#define F_TEST 0
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -56,30 +55,33 @@ DMA_HandleTypeDef hdma_sdmmc1_tx;
 SPI_HandleTypeDef hspi1;
 
 TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
+TIM_HandleTypeDef htim4;
 
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
-FIR_t hfir1;
+FIR_t hfir_pz[PIEZO_COUNT];
 
-volatile uint8_t capture_running = 1;
+volatile uint8_t capture_running = 0;
 volatile uint32_t ticks_counter = 0;
 
-volatile uint16_t pz_dma_buffer[PIEZO_COUNT];
+volatile uint16_t pz_dma_buffer[PIEZO_CHANNEL_COUNT * OVERSAMPLING_RATIO];
 
+// TODO: are these volatile???
 volatile a_data_point_t a_buffer_1[A_BUFFER_LEN];
 volatile a_data_point_t a_buffer_2[A_BUFFER_LEN];
+volatile a_data_point_t *a_buffer_current = a_buffer_1;
 volatile p_data_point_t p_buffer_1[P_BUFFER_LEN];
 volatile p_data_point_t p_buffer_2[P_BUFFER_LEN];
+volatile p_data_point_t *p_buffer_current = p_buffer_1;
 
 volatile uint32_t a_write_index = 0;
 volatile uint32_t p_write_index = 0;
 
-volatile uint8_t flag_use_a_buffer_2 = 0;
 volatile uint8_t flag_save_a_buffer_1 = 0;
 volatile uint8_t flag_save_a_buffer_2 = 0;
 volatile uint8_t flag_overflow_a_buffer = 0;
-volatile uint8_t flag_use_p_buffer_2 = 0;
 volatile uint8_t flag_save_p_buffer_1 = 0;
 volatile uint8_t flag_save_p_buffer_2 = 0;
 volatile uint8_t flag_overflow_p_buffer = 0;
@@ -100,9 +102,10 @@ static void MX_SPI1_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_TIM3_Init(void);
+static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
-PUTCHAR_PROTOTYPE;
-void switch_buffers(volatile uint8_t *flag_use_buffer_2, volatile uint8_t *flag_save_buffer_1, volatile uint8_t *flag_save_buffer_2, volatile uint8_t *flag_overflow);
+void switch_buffers(void **buffer_current, void *buffer_1, void *buffer_2, volatile uint8_t *flag_save_buffer_1, volatile uint8_t *flag_save_buffer_2, volatile uint8_t *flag_overflow);
 void a_buffer_write_inc(void);
 void p_buffer_write_inc(void);
 /* USER CODE END PFP */
@@ -146,6 +149,8 @@ int main(void)
 	MX_USART3_UART_Init();
 	MX_TIM2_Init();
 	MX_ADC1_Init();
+	MX_TIM3_Init();
+	MX_TIM4_Init();
 	/* USER CODE BEGIN 2 */
 	HAL_Delay(1);
 
@@ -160,9 +165,7 @@ int main(void)
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 
-	a_buffer_1[0].complete = A_COMPLETE_TIMESTAMP;
 	a_buffer_1[0].timestamp = ticks_counter;
-	p_buffer_1[0].complete = P_COMPLETE_TIMESTAMP;
 	p_buffer_1[0].timestamp = ticks_counter;
 
 	uint8_t do_format_sd = HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin) == GPIO_PIN_SET;
@@ -178,8 +181,12 @@ int main(void)
 	}
 
 	// Start FIR filter
-	FIR_Init(&hfir1, fir_taps);
+	for (uint8_t i_ch = 0; i_ch < PIEZO_COUNT; i_ch++)
+	{
+		FIR_Init(&hfir_pz[i_ch], fir_taps);
+	}
 
+#if F_TEST == 1
 	float freqs[400];
 	float amps[400];
 	float delays[400];
@@ -200,13 +207,13 @@ int main(void)
 		{
 			for (uint8_t i = 0; i < FIR_BLOCK_LEN; i++)
 			{
-				hfir1.In[i] = arm_sin_f32(2.0f * PI * freqs[f_i] / 16000.0f * (float)sim_t);
+				hfir_pz[0].In[i] = arm_sin_f32(2.0f * PI * freqs[f_i] / 16000.0f * (float)sim_t);
 				sim_t++;
 			}
-			FIR_Update(&hfir1);
+			FIR_Update(&hfir_pz[0]);
 			for (uint8_t i = 0; i < FIR_BLOCK_LEN; i++)
 			{
-				a_max = hfir1.Out[i] > a_max ? hfir1.Out[i] : a_max;
+				a_max = hfir_pz[0].Out[i] > a_max ? hfir_pz[0].Out[i] : a_max;
 				if (a_max > 0.1 && delay_set == 0)
 				{
 					delays[f_i] = (float)sim_t / 16000.0f;
@@ -217,22 +224,22 @@ int main(void)
 		amps[f_i] = a_max;
 		for (uint8_t i = 0; i < FIR_BLOCK_LEN; i++)
 		{
-			hfir1.In[i] = 0;
+			hfir_pz[0].In[i] = 0;
 		}
 		for (uint8_t j = 0; j < 10; j++)
 		{
-			FIR_Update(&hfir1);
+			FIR_Update(&hfir_pz[0]);
 		}
 	}
 
 	/*
-	 printf("%f", hfir1.Out[i]);
+	 printf("%f", hfir_pz[0].Out[i]);
 	 int16_t k;
-	 if (hfir1.Out[i] < -1.0f)
-	 hfir1.Out[i] = -1.0f;
-	 else if (hfir1.Out[i] > -1.0f)
-	 hfir1.Out[i] = 1.0f;
-	 k = (int16_t)(hfir1.Out[i] * 0xFFF); // 13 bit?, 24 bit -> 0x7FFFFF (do this and bit shift?), 12 bit -> 0x7FF
+	 if (hfir_pz[0].Out[i] < -1.0f)
+	 hfir_pz[0].Out[i] = -1.0f;
+	 else if (hfir_pz[0].Out[i] > -1.0f)
+	 hfir_pz[0].Out[i] = 1.0f;
+	 k = (int16_t)(hfir_pz[0].Out[i] * 0xFFF); // 13 bit?, 24 bit -> 0x7FFFFF (do this and bit shift?), 12 bit -> 0x7FF
 	 printf(" (%hi)\r\n", k);
 	 */
 
@@ -253,21 +260,35 @@ int main(void)
 			printf(",");
 	}
 	printf("]\r\n\r\n");
+#endif
 
-// Start piezo ADC
-	if (HAL_ADC_Start_DMA(&hadc1, (uint32_t*)pz_dma_buffer, PIEZO_COUNT) != HAL_OK)
+	// Start piezo ADC
+	if (HAL_ADC_Start_DMA(&hadc1, (uint32_t*)pz_dma_buffer, PIEZO_CHANNEL_COUNT * OVERSAMPLING_RATIO) != HAL_OK)
 	{
 		printf("(%lu) ERROR: main: ADC1 HAL_ADC_Start_DMA failed\r\n", HAL_GetTick());
 		Error_Handler();
 	}
-// Start data capture timer
+	// Start oversampling timer
 	if (HAL_TIM_Base_Start_IT(&htim2) != HAL_OK)
+	{
+		printf("(%lu) ERROR: main: HAL_TIM_Base_Start_IT failed\r\n", HAL_GetTick());
+		Error_Handler();
+	}
+	// Start regular piezo timer
+	if (HAL_TIM_Base_Start_IT(&htim3) != HAL_OK)
+	{
+		printf("(%lu) ERROR: main: HAL_TIM_Base_Start_IT failed\r\n", HAL_GetTick());
+		Error_Handler();
+	}
+	// Start GPS timer
+	if (HAL_TIM_Base_Start_IT(&htim4) != HAL_OK)
 	{
 		printf("(%lu) ERROR: main: HAL_TIM_Base_Start_IT failed\r\n", HAL_GetTick());
 		Error_Handler();
 	}
 
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
+	capture_running = 1;
 	printf("(%lu) Capture started\r\n", HAL_GetTick());
 	/* USER CODE END 2 */
 
@@ -282,6 +303,15 @@ int main(void)
 		if (flag_save_a_buffer_1)
 		{
 			DEBUG_A_BUFFER_1_SD
+#if F_TEST == 2
+			int16_t min = 5000, max = -5000;
+			for (uint16_t i = 0; i < A_BUFFER_LEN; i++)
+			{
+				min = (int16_t)a_buffer_1[i].a_piezo[1] < min ? (int16_t)a_buffer_1[i].a_piezo[1] : min;
+				max = (int16_t)a_buffer_1[i].a_piezo[1] > max ? (int16_t)a_buffer_1[i].a_piezo[1] : max;
+			}
+			printf("A_PZ = %.3f V    (offset %.3f V)\r\n", (max - min) / 4095.0f * 3.3f, (min + max) / 4095.0f * 1.65f);
+#endif
 			if (SD_Save_a_data(a_buffer_1, sizeof(a_buffer_1)) != HAL_OK)
 			{
 				Error_Handler();
@@ -294,6 +324,15 @@ int main(void)
 		if (flag_save_a_buffer_2)
 		{
 			DEBUG_A_BUFFER_2_SD
+#if F_TEST == 2
+			int16_t min = 5000, max = -5000;
+			for (uint16_t i = 0; i < A_BUFFER_LEN; i++)
+			{
+				min = (int16_t)a_buffer_2[i].a_piezo[1] < min ? (int16_t)a_buffer_2[i].a_piezo[1] : min;
+				max = (int16_t)a_buffer_2[i].a_piezo[1] > max ? (int16_t)a_buffer_2[i].a_piezo[1] : max;
+			}
+			printf("A_PZ = %.3f V    (offset %.3f V)\r\n", (max - min) / 4095.0f * 3.3f, (min + max) / 4095.0f * 1.65f);
+#endif
 			if (SD_Save_a_data(a_buffer_2, sizeof(a_buffer_2)) != HAL_OK)
 			{
 				Error_Handler();
@@ -351,12 +390,12 @@ int main(void)
 	HAL_TIM_Base_Stop_IT(&htim2);
 	HAL_ADC_Stop_IT(&hadc1);
 
-// Save remaining data
-	if (SD_Save_a_data(A_BUFFER_CURRENT, a_write_index * sizeof(a_data_point_t)) != HAL_OK)
+	// Save remaining data
+	if (SD_Save_a_data(a_buffer_current, a_write_index * sizeof(a_data_point_t)) != HAL_OK)
 	{
 		Error_Handler();
 	}
-	if (SD_Save_p_data(P_BUFFER_CURRENT, p_write_index * sizeof(p_data_point_t)) != HAL_OK)
+	if (SD_Save_p_data(p_buffer_current, p_write_index * sizeof(p_data_point_t)) != HAL_OK)
 	{
 		Error_Handler();
 	}
@@ -388,7 +427,7 @@ void SystemClock_Config(void)
 	/** Configure the main internal regulator output voltage
 	 */
 	__HAL_RCC_PWR_CLK_ENABLE();
-	__HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE3);
+	__HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
 	/** Initializes the RCC Oscillators according to the specified parameters
 	 * in the RCC_OscInitTypeDef structure.
@@ -398,10 +437,10 @@ void SystemClock_Config(void)
 	RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
 	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
 	RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-	RCC_OscInitStruct.PLL.PLLM = 16;
-	RCC_OscInitStruct.PLL.PLLN = 192;
+	RCC_OscInitStruct.PLL.PLLM = 8;
+	RCC_OscInitStruct.PLL.PLLN = 216;
 	RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-	RCC_OscInitStruct.PLL.PLLQ = 6;
+	RCC_OscInitStruct.PLL.PLLQ = 9;
 	RCC_OscInitStruct.PLL.PLLR = 2;
 	if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
 	{
@@ -420,10 +459,10 @@ void SystemClock_Config(void)
 	RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
 	RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
 	RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-	RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
-	RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
+	RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
+	RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV4;
 
-	if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
+	if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_7) != HAL_OK)
 	{
 		Error_Handler();
 	}
@@ -606,7 +645,7 @@ static void MX_TIM2_Init(void)
 	htim2.Instance = TIM2;
 	htim2.Init.Prescaler = 0;
 	htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-	htim2.Init.Period = 6000;
+	htim2.Init.Period = 6750 - 1;
 	htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
 	htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
 	if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -627,6 +666,98 @@ static void MX_TIM2_Init(void)
 	/* USER CODE BEGIN TIM2_Init 2 */
 
 	/* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
+ * @brief TIM3 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_TIM3_Init(void)
+{
+
+	/* USER CODE BEGIN TIM3_Init 0 */
+
+	/* USER CODE END TIM3_Init 0 */
+
+	TIM_SlaveConfigTypeDef sSlaveConfig = { 0 };
+	TIM_MasterConfigTypeDef sMasterConfig = { 0 };
+
+	/* USER CODE BEGIN TIM3_Init 1 */
+
+	/* USER CODE END TIM3_Init 1 */
+	htim3.Instance = TIM3;
+	htim3.Init.Prescaler = 0;
+	htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+	htim3.Init.Period = 4 - 1;
+	htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+	htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+	if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	sSlaveConfig.SlaveMode = TIM_SLAVEMODE_EXTERNAL1;
+	sSlaveConfig.InputTrigger = TIM_TS_ITR1;
+	if (HAL_TIM_SlaveConfigSynchro(&htim3, &sSlaveConfig) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+	sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+	if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	/* USER CODE BEGIN TIM3_Init 2 */
+
+	/* USER CODE END TIM3_Init 2 */
+
+}
+
+/**
+ * @brief TIM4 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_TIM4_Init(void)
+{
+
+	/* USER CODE BEGIN TIM4_Init 0 */
+
+	/* USER CODE END TIM4_Init 0 */
+
+	TIM_SlaveConfigTypeDef sSlaveConfig = { 0 };
+	TIM_MasterConfigTypeDef sMasterConfig = { 0 };
+
+	/* USER CODE BEGIN TIM4_Init 1 */
+
+	/* USER CODE END TIM4_Init 1 */
+	htim4.Instance = TIM4;
+	htim4.Init.Prescaler = 0;
+	htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+	htim4.Init.Period = 400 - 1;
+	htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+	htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+	if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	sSlaveConfig.SlaveMode = TIM_SLAVEMODE_EXTERNAL1;
+	sSlaveConfig.InputTrigger = TIM_TS_ITR1;
+	if (HAL_TIM_SlaveConfigSynchro(&htim4, &sSlaveConfig) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
+	sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+	if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	/* USER CODE BEGIN TIM4_Init 2 */
+
+	/* USER CODE END TIM4_Init 2 */
 
 }
 
@@ -846,10 +977,10 @@ PUTCHAR_PROTOTYPE
 	return ch;
 }
 
-void switch_buffers(volatile uint8_t *flag_use_buffer_2, volatile uint8_t *flag_save_buffer_1, volatile uint8_t *flag_save_buffer_2, volatile uint8_t *flag_overflow)
+void switch_buffers(void **buffer_current, void *buffer_1, void *buffer_2, volatile uint8_t *flag_save_buffer_1, volatile uint8_t *flag_save_buffer_2, volatile uint8_t *flag_overflow)
 {
-// If buffer_2 has been filled
-	if (*flag_use_buffer_2)
+	// If buffer_2 has been filled
+	if (*buffer_current == buffer_2)
 	{
 		// If buffer_1 has been emptied
 		if (!*flag_save_buffer_1)
@@ -857,7 +988,7 @@ void switch_buffers(volatile uint8_t *flag_use_buffer_2, volatile uint8_t *flag_
 			// buffer_2 full
 			*flag_save_buffer_2 = 1;
 			// Reset buffer_1 to use
-			*flag_use_buffer_2 = 0;
+			*buffer_current = buffer_1;
 		}
 		else
 		{
@@ -865,7 +996,7 @@ void switch_buffers(volatile uint8_t *flag_use_buffer_2, volatile uint8_t *flag_
 			*flag_overflow = 1;
 		}
 	}
-// If buffer_1 has been filled
+	// If buffer_1 has been filled
 	else
 	{
 		// If buffer_2 has been emptied
@@ -874,7 +1005,7 @@ void switch_buffers(volatile uint8_t *flag_use_buffer_2, volatile uint8_t *flag_
 			// buffer_1 full
 			*flag_save_buffer_1 = 1;
 			// Reset buffer_2 to use
-			*flag_use_buffer_2 = 1;
+			*buffer_current = buffer_2;
 		}
 		else
 		{
@@ -886,58 +1017,63 @@ void switch_buffers(volatile uint8_t *flag_use_buffer_2, volatile uint8_t *flag_
 
 void a_buffer_write_inc()
 {
-// Set complete bits of last data point
-	A_BUFFER_CURRENT[a_write_index].complete |= (1 << A_COMPLETE_TIMESTAMP) | (flag_complete_a_mems << A_COMPLETE_MEMS) | (flag_complete_a_pz << A_COMPLETE_PZ);
+	// Set complete bits of last data point
+	a_buffer_current[a_write_index].complete |= (1 << A_COMPLETE_TIMESTAMP) | (flag_complete_a_mems << A_COMPLETE_MEMS) | (flag_complete_a_pz << A_COMPLETE_PZ);
 
-// If next index would overflow
+	// If next index would overflow
 	if (++a_write_index >= A_BUFFER_LEN)
 	{
 		// Switch buffers
 		a_write_index = 0;
-		switch_buffers(&flag_use_a_buffer_2, &flag_save_a_buffer_1, &flag_save_a_buffer_2, &flag_overflow_a_buffer);
+		switch_buffers((void**)&a_buffer_current, (void*)a_buffer_1, (void*)a_buffer_2, &flag_save_a_buffer_1, &flag_save_a_buffer_2, &flag_overflow_a_buffer);
 	}
 
-	A_BUFFER_CURRENT[a_write_index].timestamp = ticks_counter;
-	A_BUFFER_CURRENT[a_write_index].x_mems1 = a_write_index;
+	a_buffer_current[a_write_index].timestamp = ticks_counter;
+	a_buffer_current[a_write_index].x_mems1 = a_write_index;
 }
 
 void p_buffer_write_inc()
 {
-// Set complete bits of last data point
-	P_BUFFER_CURRENT[p_write_index].complete |= (1 << P_COMPLETE_TIMESTAMP) | (flag_complete_p_gps << P_COMPLETE_GPS);
+	// Set complete bits of last data point
+	p_buffer_current[p_write_index].complete |= (1 << P_COMPLETE_TIMESTAMP) | (flag_complete_p_gps << P_COMPLETE_GPS);
 
-// If next index would overflow
+	// If next index would overflow
 	if (++p_write_index >= P_BUFFER_LEN)
 	{
 		// Switch buffers
 		p_write_index = 0;
-		switch_buffers(&flag_use_p_buffer_2, &flag_save_p_buffer_1, &flag_save_p_buffer_2, &flag_overflow_p_buffer);
+		switch_buffers((void**)&p_buffer_current, (void*)p_buffer_1, (void*)p_buffer_2, &flag_save_p_buffer_1, &flag_save_p_buffer_2, &flag_overflow_p_buffer);
 	}
 
-	P_BUFFER_CURRENT[p_write_index].timestamp = ticks_counter;
-	P_BUFFER_CURRENT[p_write_index].gps_time = p_write_index;
+	p_buffer_current[p_write_index].timestamp = ticks_counter;
+	p_buffer_current[p_write_index].gps_time = p_write_index;
 }
 
-void Timer2_Handler(void)
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-	DEBUG_TIMER
-	if (capture_running && ticks_counter > 0)
+	if (htim->Instance == TIM3)
 	{
-		// TODO: digital filter
-		if (ticks_counter % OVERSAMPLING_RATIO == 0)
+		DEBUG_A_TIMER
+
+		if (capture_running && ticks_counter > 0)
 		{
 			// Increment data point index
 			a_buffer_write_inc();
 			// TODO: ADXL sync
 		}
-		if (ticks_counter % 100 == 0)
-		{
-			flag_complete_p_gps = 1;
-			p_buffer_write_inc();
-		}
+		ticks_counter++;
+
+		DEBUG_A_TIMER
 	}
-	ticks_counter++;
-	DEBUG_TIMER
+	else if (htim->Instance == TIM4)
+	{
+		DEBUG_P_TIMER
+
+		flag_complete_p_gps = 1;
+		p_buffer_write_inc();
+
+		DEBUG_P_TIMER
+	}
 }
 
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
@@ -948,13 +1084,24 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 		if (hadc->Instance == ADC1)
 		{
 			DEBUG_ADC_PZ_CONV
-			// Copy data from DMA buffer to current data point
-			memcpy((void*)A_BUFFER_CURRENT[a_write_index].a_piezo, (void*)pz_dma_buffer, PIEZO_COUNT * sizeof(uint16_t));
 
-			A_BUFFER_CURRENT[a_write_index].a_piezo[0] = 0;
-			A_BUFFER_CURRENT[a_write_index].a_piezo[0] = 0;
+			for (uint8_t i_sample = 0; i_sample < OVERSAMPLING_RATIO; i_sample++)
+			{
+				for (uint8_t i_ch = 0; i_ch < PIEZO_COUNT; i_ch++)
+				{
+					hfir_pz[i_ch].In[i_sample] = (int16_t)pz_dma_buffer[i_sample * PIEZO_CHANNEL_COUNT] - 2047;
+				}
+			}
+			for (uint8_t i_ch = 0; i_ch < PIEZO_COUNT; i_ch++)
+			{
+				FIR_Update(&hfir_pz[i_ch]);
+			}
+			uint8_t sample_delay = 1;
+			a_buffer_current[a_write_index].a_piezo[0] = pz_dma_buffer[0];
+			a_buffer_current[a_write_index].a_piezo[1] = hfir_pz[0].Out[sample_delay];
+			a_buffer_current[a_write_index].a_piezo[2] = pz_dma_buffer[1];
+			flag_complete_a_pz = 1;
 
-			flag_complete_a_mems = 1;
 			DEBUG_ADC_PZ_CONV
 		}
 	}

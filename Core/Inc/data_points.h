@@ -10,12 +10,12 @@
 
 #include "config.h"
 
-#define A_COMPLETE_TIMESTAMP (1 << 0)
-#define A_COMPLETE_MEMS (1 << 1)
-#define A_COMPLETE_PZ (1 << 2)
+#define A_COMPLETE_TIMESTAMP 0
+#define A_COMPLETE_MEMS 1
+#define A_COMPLETE_PZ 2
 
-#define P_COMPLETE_TIMESTAMP (1 << 0)
-#define P_COMPLETE_GPS (1 << 1)
+#define P_COMPLETE_TIMESTAMP 0
+#define P_COMPLETE_GPS 1
 
 typedef struct
 {
@@ -25,7 +25,7 @@ typedef struct
 	int32_t x_mems1;
 	int32_t y_mems1;
 	int32_t z_mems1;
-	uint16_t a_piezo[PIEZO_COUNT];
+	int16_t a_piezo[PIEZO_COUNT];
 } a_data_point_t;
 
 typedef struct
