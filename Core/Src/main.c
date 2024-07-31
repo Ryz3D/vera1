@@ -1089,17 +1089,18 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 			{
 				for (uint8_t i_ch = 0; i_ch < PIEZO_COUNT; i_ch++)
 				{
-					hfir_pz[i_ch].In[i_sample] = (int16_t)pz_dma_buffer[i_sample * PIEZO_CHANNEL_COUNT] - 2047;
+					hfir_pz[i_ch].In[i_sample] = (int16_t)(pz_dma_buffer[i_sample * PIEZO_CHANNEL_COUNT + i_ch] << 1) - 4094;
 				}
 			}
 			for (uint8_t i_ch = 0; i_ch < PIEZO_COUNT; i_ch++)
 			{
 				FIR_Update(&hfir_pz[i_ch]);
 			}
-			uint8_t sample_delay = 1;
+			uint8_t sample_delay = 3;
 			a_buffer_current[a_write_index].a_piezo[0] = pz_dma_buffer[0];
-			a_buffer_current[a_write_index].a_piezo[1] = hfir_pz[0].Out[sample_delay];
-			a_buffer_current[a_write_index].a_piezo[2] = pz_dma_buffer[1];
+			a_buffer_current[a_write_index].a_piezo[1] = pz_dma_buffer[1];
+			a_buffer_current[a_write_index].a_piezo[2] = hfir_pz[0].Out[sample_delay];
+			a_buffer_current[a_write_index].a_piezo[3] = hfir_pz[1].Out[sample_delay];
 			flag_complete_a_pz = 1;
 
 			DEBUG_ADC_PZ_CONV
