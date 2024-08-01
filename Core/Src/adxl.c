@@ -1,3 +1,10 @@
+/*
+ * adxl.c
+ *
+ *  Created on: Aug 02, 2024
+ *      Author: mirco
+ */
+
 #include <adxl.h>
 
 HAL_StatusTypeDef adxl_get_reg(SPI_HandleTypeDef *hspi, uint8_t addr)

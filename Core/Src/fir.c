@@ -1,5 +1,5 @@
 /*
- * DigitalFilter.c
+ * fir.c
  *
  *  Created on: Jul 29, 2024
  *      Author: mirco
@@ -7,11 +7,12 @@
 
 #include <fir.h>
 
+// TODO: pre-reverse taps
 #define FIR_REV 1
 
 q15_t taps_rev[FIR_TAPS_LEN];
 
-HAL_StatusTypeDef FIR_Init(FIR_t *filter, const q15_t *taps)
+HAL_StatusTypeDef FIR_Init(FIR_t *filter, const int16_t taps[])
 {
 #if FIR_REV
 	for (uint16_t i = 0; i < FIR_TAPS_LEN; i++)

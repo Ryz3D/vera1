@@ -22,9 +22,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "arm_math.h"
-#include "fir_taps8_i.h"
 #include "fir.h"
+#include "fir_taps8_i.h"
 #include "sd.h"
 /* USER CODE END Includes */
 
@@ -35,7 +34,6 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
-
 #define F_TEST 0
 /* USER CODE END PD */
 
@@ -47,6 +45,8 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
+
+DAC_HandleTypeDef hdac;
 
 SD_HandleTypeDef hsd1;
 DMA_HandleTypeDef hdma_sdmmc1_rx;
@@ -104,6 +104,7 @@ static void MX_TIM2_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
+static void MX_DAC_Init(void);
 /* USER CODE BEGIN PFP */
 void switch_buffers(void **buffer_current, void *buffer_1, void *buffer_2, volatile uint8_t *flag_save_buffer_1, volatile uint8_t *flag_save_buffer_2, volatile uint8_t *flag_overflow);
 void a_buffer_write_inc(void);
@@ -151,6 +152,7 @@ int main(void)
 	MX_ADC1_Init();
 	MX_TIM3_Init();
 	MX_TIM4_Init();
+	MX_DAC_Init();
 	/* USER CODE BEGIN 2 */
 	HAL_Delay(1);
 
@@ -165,6 +167,12 @@ int main(void)
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 
+	// Init FIR filter
+	for (uint8_t i_ch = 0; i_ch < PIEZO_COUNT; i_ch++)
+	{
+		FIR_Init(&hfir_pz[i_ch], fir_taps);
+	}
+
 	a_buffer_1[0].timestamp = ticks_counter;
 	p_buffer_1[0].timestamp = ticks_counter;
 
@@ -178,12 +186,6 @@ int main(void)
 	if (SD_Init(do_format_sd) != HAL_OK)
 	{
 		Error_Handler();
-	}
-
-	// Start FIR filter
-	for (uint8_t i_ch = 0; i_ch < PIEZO_COUNT; i_ch++)
-	{
-		FIR_Init(&hfir_pz[i_ch], fir_taps);
 	}
 
 #if F_TEST == 1
@@ -207,7 +209,7 @@ int main(void)
 		{
 			for (uint8_t i = 0; i < FIR_BLOCK_LEN; i++)
 			{
-				hfir_pz[0].In[i] = arm_sin_f32(2.0f * PI * freqs[f_i] / 16000.0f * (float)sim_t);
+				hfir_pz[0].In[i] = sin(2.0f * PI * freqs[f_i] / 16000.0f * (float)sim_t);
 				sim_t++;
 			}
 			FIR_Update(&hfir_pz[0]);
@@ -262,6 +264,8 @@ int main(void)
 	printf("]\r\n\r\n");
 #endif
 
+	HAL_DAC_Start(&hdac, DAC_CHANNEL_2);
+
 	// Start piezo ADC
 	if (HAL_ADC_Start_DMA(&hadc1, (uint32_t*)pz_dma_buffer, PIEZO_CHANNEL_COUNT * OVERSAMPLING_RATIO) != HAL_OK)
 	{
@@ -288,8 +292,10 @@ int main(void)
 	}
 
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
+	uint32_t boot_duration = HAL_GetTick();
+	SD_WriteFileHeaders(boot_duration, FIR_TAPS_LEN);
 	capture_running = 1;
-	printf("(%lu) Capture started\r\n", HAL_GetTick());
+	printf("(%lu) Capture started\r\n", boot_duration);
 	/* USER CODE END 2 */
 
 	/* Infinite loop */
@@ -312,7 +318,7 @@ int main(void)
 			}
 			printf("A_PZ = %.3f V    (offset %.3f V)\r\n", (max - min) / 4095.0f * 3.3f, (min + max) / 4095.0f * 1.65f);
 #endif
-			if (SD_Save_a_data(a_buffer_1, sizeof(a_buffer_1)) != HAL_OK)
+			if (SD_WriteBuffer(a_file_path, (void*)a_buffer_1, sizeof(a_buffer_1)) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -333,7 +339,7 @@ int main(void)
 			}
 			printf("A_PZ = %.3f V    (offset %.3f V)\r\n", (max - min) / 4095.0f * 3.3f, (min + max) / 4095.0f * 1.65f);
 #endif
-			if (SD_Save_a_data(a_buffer_2, sizeof(a_buffer_2)) != HAL_OK)
+			if (SD_WriteBuffer(a_file_path, (void*)a_buffer_2, sizeof(a_buffer_2)) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -350,7 +356,7 @@ int main(void)
 		if (flag_save_p_buffer_1)
 		{
 			DEBUG_P_BUFFER_1_SD
-			if (SD_Save_p_data(p_buffer_1, sizeof(p_buffer_1)) != HAL_OK)
+			if (SD_WriteBuffer(p_file_path, (void*)p_buffer_1, sizeof(p_buffer_1)) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -362,7 +368,7 @@ int main(void)
 		if (flag_save_p_buffer_2)
 		{
 			DEBUG_P_BUFFER_2_SD
-			if (SD_Save_p_data(p_buffer_2, sizeof(p_buffer_2)) != HAL_OK)
+			if (SD_WriteBuffer(p_file_path, (void*)p_buffer_2, sizeof(p_buffer_2)) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -391,11 +397,11 @@ int main(void)
 	HAL_ADC_Stop_IT(&hadc1);
 
 	// Save remaining data
-	if (SD_Save_a_data(a_buffer_current, a_write_index * sizeof(a_data_point_t)) != HAL_OK)
+	if (SD_WriteBuffer(a_file_path, (void*)a_buffer_current, a_write_index * sizeof(a_data_point_t)) != HAL_OK)
 	{
 		Error_Handler();
 	}
-	if (SD_Save_p_data(p_buffer_current, p_write_index * sizeof(p_data_point_t)) != HAL_OK)
+	if (SD_WriteBuffer(p_file_path, (void*)p_buffer_current, p_write_index * sizeof(p_data_point_t)) != HAL_OK)
 	{
 		Error_Handler();
 	}
@@ -553,6 +559,46 @@ static void MX_ADC1_Init(void)
 	/* USER CODE BEGIN ADC1_Init 2 */
 
 	/* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+ * @brief DAC Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_DAC_Init(void)
+{
+
+	/* USER CODE BEGIN DAC_Init 0 */
+
+	/* USER CODE END DAC_Init 0 */
+
+	DAC_ChannelConfTypeDef sConfig = { 0 };
+
+	/* USER CODE BEGIN DAC_Init 1 */
+
+	/* USER CODE END DAC_Init 1 */
+
+	/** DAC Initialization
+	 */
+	hdac.Instance = DAC;
+	if (HAL_DAC_Init(&hdac) != HAL_OK)
+	{
+		Error_Handler();
+	}
+
+	/** DAC channel OUT2 config
+	 */
+	sConfig.DAC_Trigger = DAC_TRIGGER_NONE;
+	sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
+	if (HAL_DAC_ConfigChannel(&hdac, &sConfig, DAC_CHANNEL_2) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	/* USER CODE BEGIN DAC_Init 2 */
+
+	/* USER CODE END DAC_Init 2 */
 
 }
 
@@ -1089,19 +1135,20 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 			{
 				for (uint8_t i_ch = 0; i_ch < PIEZO_COUNT; i_ch++)
 				{
-					hfir_pz[i_ch].In[i_sample] = (int16_t)(pz_dma_buffer[i_sample * PIEZO_CHANNEL_COUNT + i_ch] << 1) - 4094;
+					hfir_pz[i_ch].In[i_sample] = (pz_dma_buffer[i_sample * PIEZO_CHANNEL_COUNT + i_ch] << 1) - 4094;
 				}
 			}
 			for (uint8_t i_ch = 0; i_ch < PIEZO_COUNT; i_ch++)
 			{
 				FIR_Update(&hfir_pz[i_ch]);
+				a_buffer_current[a_write_index].a_piezo[i_ch] = hfir_pz[i_ch].Out[0];
 			}
-			uint8_t sample_delay = 3;
-			a_buffer_current[a_write_index].a_piezo[0] = pz_dma_buffer[0];
-			a_buffer_current[a_write_index].a_piezo[1] = pz_dma_buffer[1];
-			a_buffer_current[a_write_index].a_piezo[2] = hfir_pz[0].Out[sample_delay];
-			a_buffer_current[a_write_index].a_piezo[3] = hfir_pz[1].Out[sample_delay];
+			// Override for unfiltered channels:
+			a_buffer_current[a_write_index].a_piezo[2] = (pz_dma_buffer[0] << 1) - 4094;
+			a_buffer_current[a_write_index].a_piezo[3] = (pz_dma_buffer[1] << 1) - 4094;
 			flag_complete_a_pz = 1;
+
+			HAL_DAC_SetValue(&hdac, DAC_CHANNEL_2, DAC_ALIGN_12B_R, (hfir_pz[0].Out[0] >> 1) + 2047);
 
 			DEBUG_ADC_PZ_CONV
 		}

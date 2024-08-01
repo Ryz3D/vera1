@@ -1,5 +1,5 @@
 /*
- * DigitalFilter.h
+ * fir.h
  *
  *  Created on: Jul 29, 2024
  *      Author: mirco
@@ -23,7 +23,7 @@ typedef struct
 	q15_t Out[FIR_BLOCK_LEN];
 } FIR_t;
 
-HAL_StatusTypeDef FIR_Init(FIR_t *filter, const q15_t *taps);
+HAL_StatusTypeDef FIR_Init(FIR_t *filter, const int16_t taps[]);
 HAL_StatusTypeDef FIR_Update(FIR_t *filter);
 
 #endif /* INC_FIR_H_ */

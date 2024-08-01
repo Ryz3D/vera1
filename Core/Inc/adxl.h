@@ -1,7 +1,7 @@
 /*
  * adxl357.h
  *
- *  Created on: Jun 15, 2024
+ *  Created on: Jul 30, 2024
  *      Author: mirco
  */
 

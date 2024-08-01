@@ -1,7 +1,7 @@
 /*
  * config.h
  *
- *  Created on: Jul 14, 2024
+ *  Created on: Jul 26, 2024
  *      Author: mirco
  */
 
@@ -9,7 +9,7 @@
 #define INC_CONFIG_H_
 
 // Sampling rate = 4 kSa/s * OVERSAMPLING_RATIO
-// default: 4
+// default: 4 -> 16 kSa/s
 #define OVERSAMPLING_RATIO 4
 // Number of ADC channels configured
 // default: 5
@@ -18,6 +18,7 @@
 // default: 2
 #define PIEZO_COUNT 5
 // Length of acceleration data point buffer (write to SD-card every (4096 Sa) / (4 kSa/s) = 1.024 s)
+// This option has a huge impact on RAM usage, it can be reduced if the main function has enough time to save the buffer before the next interrupt
 // default: 4096
 #define A_BUFFER_LEN 4096
 // Length of position data point buffer (write to SD-card every (128 Sa) / (40 Sa/s) = 3.2 s)

@@ -1,7 +1,7 @@
 /*
  * sdhc.h
  *
- *  Created on: Jun 26, 2024
+ *  Created on: Jul 26, 2024
  *      Author: mirco
  */
 
@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "stm32f7xx_hal.h"
 #include "fatfs.h"
 #include "data_points.h"
 
@@ -28,13 +29,11 @@ extern TCHAR log_file_path[];
 extern char sd_log[];
 extern uint32_t sd_log_write_index;
 
-HAL_StatusTypeDef SD_TouchFile(TCHAR *path);
-void SD_UpdateFilepaths(void);
-
 HAL_StatusTypeDef SD_Init(uint8_t do_format);
 HAL_StatusTypeDef SD_Uninit(void);
-HAL_StatusTypeDef SD_Save_a_data(volatile a_data_point_t *a_data_buffer, uint32_t a_data_size);
-HAL_StatusTypeDef SD_Save_p_data(volatile p_data_point_t *p_data_buffer, uint32_t p_data_size);
+HAL_StatusTypeDef SD_TouchFile(TCHAR *path);
+HAL_StatusTypeDef SD_WriteBuffer(TCHAR *path, void *data, uint32_t size);
+HAL_StatusTypeDef SD_WriteFileHeaders(uint32_t boot_duration, uint32_t fir_taps_len);
 HAL_StatusTypeDef SD_FlushLog(void);
 
 #endif /* INC_SD_H_ */

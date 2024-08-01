@@ -1,7 +1,7 @@
 /*
  * data_points.h
  *
- *  Created on: Jul 1, 2024
+ *  Created on: Jul 24, 2024
  *      Author: mirco
  */
 
@@ -19,6 +19,15 @@
 
 typedef struct
 {
+	uint32_t boot_duration;
+	uint32_t a_buffer_len;
+	uint8_t piezo_count;
+	uint8_t oversampling_ratio;
+	uint32_t fir_taps_len;
+} a_data_header_t;
+
+typedef struct
+{
 	uint8_t complete;
 	uint32_t timestamp;
 	uint16_t temp_mems1;
@@ -27,6 +36,12 @@ typedef struct
 	int32_t z_mems1;
 	int16_t a_piezo[PIEZO_COUNT];
 } a_data_point_t;
+
+typedef struct
+{
+	uint32_t boot_duration;
+	uint32_t p_buffer_len;
+} p_data_header_t;
 
 typedef struct
 {
