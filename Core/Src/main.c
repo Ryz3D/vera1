@@ -173,8 +173,8 @@ int main(void)
 		FIR_Init(&hfir_pz[i_ch], fir_taps);
 	}
 
-	a_buffer_1[0].timestamp = ticks_counter;
-	p_buffer_1[0].timestamp = ticks_counter;
+	a_buffer_1[0].timestamp = 0;
+	p_buffer_1[0].timestamp = 0;
 
 	uint8_t do_format_sd = HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin) == GPIO_PIN_SET;
 	if (do_format_sd)
