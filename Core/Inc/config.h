@@ -44,4 +44,11 @@
 // GPS timer interrupt (@ 40 Hz)
 #define DEBUG_P_TIMER ;
 
+#define DEBUG_TEST_PRINT_CONFIG 1
+#define DEBUG_TEST_ALWAYS_FORMAT_SD 0
+#define DEBUG_TEST_FIR_FREQUENCY_SWEEP 0
+#define DEBUG_TEST_FIR_DAC 1
+#define DEBUG_TEST_PRINT_A 1
+#define DEBUG_TEST_PRINT_P 1
+
 #endif /* INC_CONFIG_H_ */

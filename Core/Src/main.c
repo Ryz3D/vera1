@@ -22,9 +22,13 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "config.h"
+#include "data_points.h"
 #include "fir.h"
 #include "fir_taps8_i.h"
+#include "debug_tests.h"
 #include "sd.h"
+#include "adxl.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -34,7 +38,6 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
-#define F_TEST 0
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -157,11 +160,9 @@ int main(void)
 	HAL_Delay(1);
 
 	printf("(%lu) Booting...\r\n", HAL_GetTick());
-	printf("(%lu) Config: ", HAL_GetTick());
-	printf("OVERSAMPLING_RATIO=%i ", OVERSAMPLING_RATIO);
-	printf("PIEZO_COUNT=%i ", PIEZO_COUNT);
-	printf("A_BUFFER_LEN=%i ", A_BUFFER_LEN);
-	printf("P_BUFFER_LEN=%i\r\n", P_BUFFER_LEN);
+#if DEBUG_TEST_PRINT_CONFIG
+	Debug_test_print_config();
+#endif
 
 	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
@@ -176,7 +177,15 @@ int main(void)
 	a_buffer_1[0].timestamp = 0;
 	p_buffer_1[0].timestamp = 0;
 
-	uint8_t do_format_sd = HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin) == GPIO_PIN_SET;
+#if DEBUG_TEST_ALWAYS_FORMAT_SD
+	uint8_t do_format_sd = 1;
+#else
+	uint8_t do_format_sd = 0;
+#endif
+	if (HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin) == GPIO_PIN_SET)
+	{
+		do_format_sd = 1;
+	}
 	if (do_format_sd)
 	{
 		HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
@@ -188,83 +197,13 @@ int main(void)
 		Error_Handler();
 	}
 
-#if F_TEST == 1
-	float freqs[400];
-	float amps[400];
-	float delays[400];
-
-	for (uint16_t f_i = 0; f_i < 400; f_i++)
-	{
-		freqs[f_i] = 10 + f_i * 10;
-		amps[f_i] = 0;
-		delays[f_i] = 0;
-	}
-
-	for (uint16_t f_i = 0; f_i < 400; f_i++)
-	{
-		uint32_t sim_t = 0;
-		float a_max = 0;
-		uint8_t delay_set = 0;
-		for (uint16_t iter = 0; iter < 400; iter++)
-		{
-			for (uint8_t i = 0; i < FIR_BLOCK_LEN; i++)
-			{
-				hfir_pz[0].In[i] = sin(2.0f * PI * freqs[f_i] / 16000.0f * (float)sim_t);
-				sim_t++;
-			}
-			FIR_Update(&hfir_pz[0]);
-			for (uint8_t i = 0; i < FIR_BLOCK_LEN; i++)
-			{
-				a_max = hfir_pz[0].Out[i] > a_max ? hfir_pz[0].Out[i] : a_max;
-				if (a_max > 0.1 && delay_set == 0)
-				{
-					delays[f_i] = (float)sim_t / 16000.0f;
-					delay_set = 1;
-				}
-			}
-		}
-		amps[f_i] = a_max;
-		for (uint8_t i = 0; i < FIR_BLOCK_LEN; i++)
-		{
-			hfir_pz[0].In[i] = 0;
-		}
-		for (uint8_t j = 0; j < 10; j++)
-		{
-			FIR_Update(&hfir_pz[0]);
-		}
-	}
-
-	/*
-	 printf("%f", hfir_pz[0].Out[i]);
-	 int16_t k;
-	 if (hfir_pz[0].Out[i] < -1.0f)
-	 hfir_pz[0].Out[i] = -1.0f;
-	 else if (hfir_pz[0].Out[i] > -1.0f)
-	 hfir_pz[0].Out[i] = 1.0f;
-	 k = (int16_t)(hfir_pz[0].Out[i] * 0xFFF); // 13 bit?, 24 bit -> 0x7FFFFF (do this and bit shift?), 12 bit -> 0x7FF
-	 printf(" (%hi)\r\n", k);
-	 */
-
-	printf("[");
-	for (uint16_t i = 0; i < 400; i++)
-	{
-		printf("(%hu, %.4f)", (uint16_t)freqs[i], amps[i]);
-		if (i < 399)
-			printf(",");
-	}
-	printf("]\r\n\r\n");
-
-	printf("[");
-	for (uint16_t i = 0; i < 400; i++)
-	{
-		printf("(%hu, %.4f)", (uint16_t)freqs[i], delays[i]);
-		if (i < 399)
-			printf(",");
-	}
-	printf("]\r\n\r\n");
+#if DEBUG_TEST_FIR_FREQUENCY_SWEEP
+	Debug_test_FIR_frequency_sweep(&hfir_pz[0]);
 #endif
 
+#if DEBUG_TEST_FIR_DAC
 	HAL_DAC_Start(&hdac, DAC_CHANNEL_2);
+#endif
 
 	// Start piezo ADC
 	if (HAL_ADC_Start_DMA(&hadc1, (uint32_t*)pz_dma_buffer, PIEZO_CHANNEL_COUNT * OVERSAMPLING_RATIO) != HAL_OK)
@@ -309,19 +248,13 @@ int main(void)
 		if (flag_save_a_buffer_1)
 		{
 			DEBUG_A_BUFFER_1_SD
-#if F_TEST == 2
-			int16_t min = 5000, max = -5000;
-			for (uint16_t i = 0; i < A_BUFFER_LEN; i++)
-			{
-				min = (int16_t)a_buffer_1[i].a_piezo[1] < min ? (int16_t)a_buffer_1[i].a_piezo[1] : min;
-				max = (int16_t)a_buffer_1[i].a_piezo[1] > max ? (int16_t)a_buffer_1[i].a_piezo[1] : max;
-			}
-			printf("A_PZ = %.3f V    (offset %.3f V)\r\n", (max - min) / 4095.0f * 3.3f, (min + max) / 4095.0f * 1.65f);
-#endif
 			if (SD_WriteBuffer(a_file_path, (void*)a_buffer_1, sizeof(a_buffer_1)) != HAL_OK)
 			{
 				Error_Handler();
 			}
+#if DEBUG_TEST_PRINT_A
+			Debug_test_print_a(a_buffer_1);
+#endif
 			// Flag a_buffer_1 as saved
 			flag_save_a_buffer_1 = 0;
 			DEBUG_A_BUFFER_1_SD
@@ -330,19 +263,13 @@ int main(void)
 		if (flag_save_a_buffer_2)
 		{
 			DEBUG_A_BUFFER_2_SD
-#if F_TEST == 2
-			int16_t min = 5000, max = -5000;
-			for (uint16_t i = 0; i < A_BUFFER_LEN; i++)
-			{
-				min = (int16_t)a_buffer_2[i].a_piezo[1] < min ? (int16_t)a_buffer_2[i].a_piezo[1] : min;
-				max = (int16_t)a_buffer_2[i].a_piezo[1] > max ? (int16_t)a_buffer_2[i].a_piezo[1] : max;
-			}
-			printf("A_PZ = %.3f V    (offset %.3f V)\r\n", (max - min) / 4095.0f * 3.3f, (min + max) / 4095.0f * 1.65f);
-#endif
 			if (SD_WriteBuffer(a_file_path, (void*)a_buffer_2, sizeof(a_buffer_2)) != HAL_OK)
 			{
 				Error_Handler();
 			}
+#if DEBUG_TEST_PRINT_A
+			Debug_test_print_a(a_buffer_2);
+#endif
 			// Flag a_buffer_2 as saved
 			flag_save_a_buffer_2 = 0;
 			DEBUG_A_BUFFER_2_SD
@@ -360,6 +287,9 @@ int main(void)
 			{
 				Error_Handler();
 			}
+#if DEBUG_TEST_PRINT_P
+			Debug_test_print_p(p_buffer_1);
+#endif
 			// Flag p_buffer_1 as saved
 			flag_save_p_buffer_1 = 0;
 			DEBUG_P_BUFFER_1_SD
@@ -372,6 +302,9 @@ int main(void)
 			{
 				Error_Handler();
 			}
+#if DEBUG_TEST_PRINT_P
+			Debug_test_print_p(p_buffer_2);
+#endif
 			// Flag p_buffer_2 as saved
 			flag_save_p_buffer_2 = 0;
 			DEBUG_P_BUFFER_2_SD
@@ -1148,7 +1081,9 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 			a_buffer_current[a_write_index].a_piezo[3] = (pz_dma_buffer[1] << 1) - 4094;
 			flag_complete_a_pz = 1;
 
+#if DEBUG_TEST_FIR_DAC
 			HAL_DAC_SetValue(&hdac, DAC_CHANNEL_2, DAC_ALIGN_12B_R, (hfir_pz[0].Out[0] >> 1) + 2047);
+#endif
 
 			DEBUG_ADC_PZ_CONV
 		}

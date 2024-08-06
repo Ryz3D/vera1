@@ -33,10 +33,6 @@ extern "C" {
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <string.h>
-
-#include "config.h"
-#include "adxl.h"
-#include "data_points.h"
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
