@@ -11,6 +11,7 @@ void Debug_test_print_config()
 {
 	printf("(%lu) Config: ", HAL_GetTick());
 	printf("OVERSAMPLING_RATIO=%i ", OVERSAMPLING_RATIO);
+	printf("PIEZO_CHANNEL_COUNT=%i ", PIEZO_CHANNEL_COUNT);
 	printf("PIEZO_COUNT=%i ", PIEZO_COUNT);
 	printf("A_BUFFER_LEN=%i ", A_BUFFER_LEN);
 	printf("P_BUFFER_LEN=%i\r\n", P_BUFFER_LEN);
@@ -109,7 +110,7 @@ void Debug_test_print_a(volatile a_data_point_t *buffer)
 	float pz_offs = (pz_min + pz_max) / 4095.0f * 1.65f;
 	float mems_ampl = mems_max - mems_min;
 	float mems_offs = mems_min - mems_max;
-	printf("Peak-peak: Piezo: %.3f V\tMEMS: %.3f\tOffset: Piezo: %.3f V\tMEMS: %.3f\r\n", pz_ampl, mems_ampl, pz_offs, mems_offs);
+	printf("(%lu) Peak-peak: Piezo: %.3f V\tMEMS: %.3f\tOffset: Piezo: %.3f V\tMEMS: %.3f\r\n", HAL_GetTick(), pz_ampl, mems_ampl, pz_offs, mems_offs);
 }
 
 void Debug_test_print_p(volatile p_data_point_t *buffer)
