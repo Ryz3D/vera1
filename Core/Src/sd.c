@@ -17,6 +17,9 @@ TCHAR log_file_path[PATH_LEN];
 char sd_log[SD_LOG_LEN];
 uint32_t sd_log_write_index = 0;
 
+a_data_header_t a_header;
+p_data_header_t p_header;
+
 HAL_StatusTypeDef SD_UpdateFilepaths(void)
 {
 	sprintf(a_file_path, A_FILE_FORMAT, sd_year, sd_month, sd_day, dir_num, page_num);
@@ -101,7 +104,7 @@ HAL_StatusTypeDef SD_Init(uint8_t do_format)
 
 	sprintf(dir_path, DIR_FORMAT, sd_year, sd_month, sd_day, dir_num);
 	FRESULT res;
-	if ((res = f_mkdir("dir_path_0")) != FR_OK)
+	if ((res = f_mkdir(dir_path)) != FR_OK)
 	{
 		printf("error %u\r\n", res);
 		printf("(%lu) ERROR: SD_Init: Create dir (\"%s\") failed\r\n", HAL_GetTick(), dir_path);
@@ -113,23 +116,20 @@ HAL_StatusTypeDef SD_Init(uint8_t do_format)
 		return HAL_ERROR;
 	}
 
-	printf("(%lu) First files '%s' / '%s'\r\n", HAL_GetTick(), a_file_path, p_file_path);
-	printf("(%lu) SD card initialized successfully\r\n", HAL_GetTick());
+	printf("(%lu) Writing dir '%s'\r\n", HAL_GetTick(), dir_path);
 
 	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
 	HAL_Delay(2000);
 	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
 	HAL_Delay(250);
 
-	/*
-	 for (int32_t i = 0; i < file_num; i++)
-	 {
-	 HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
-	 HAL_Delay(250);
-	 HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
-	 HAL_Delay(250);
-	 }
-	 */
+	for (int32_t i = 0; i < dir_num; i++)
+	{
+		HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
+		HAL_Delay(250);
+		HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
+		HAL_Delay(250);
+	}
 
 	return HAL_OK;
 }
@@ -144,8 +144,7 @@ HAL_StatusTypeDef SD_Uninit(void)
 
 HAL_StatusTypeDef SD_TouchFile(TCHAR *path)
 {
-	if (f_open(&SDFile, path,
-	FA_CREATE_ALWAYS | FA_WRITE) != FR_OK)
+	if (f_open(&SDFile, path, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK)
 	{
 		return HAL_ERROR;
 	}
@@ -157,7 +156,9 @@ HAL_StatusTypeDef SD_TouchFile(TCHAR *path)
 HAL_StatusTypeDef SD_WriteBuffer(TCHAR *path, void *data, uint32_t size)
 {
 	if (size == 0)
+	{
 		return HAL_OK;
+	}
 
 	if (f_open(&SDFile, path, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
 	{
@@ -183,27 +184,12 @@ HAL_StatusTypeDef SD_WriteBuffer(TCHAR *path, void *data, uint32_t size)
 	return HAL_OK;
 }
 
-HAL_StatusTypeDef SD_WriteFileHeaders(uint32_t boot_duration, uint32_t fir_taps_len)
-{
-	a_data_header_t a_header = { .boot_duration = boot_duration, .a_buffer_len = A_BUFFER_LEN, .piezo_count = PIEZO_COUNT, .oversampling_ratio = OVERSAMPLING_RATIO, .fir_taps_len = fir_taps_len };
-	if (SD_WriteBuffer(a_file_path, (void*)&a_header, sizeof(a_data_header_t)) != HAL_OK)
-	{
-		return HAL_ERROR;
-	}
-
-	p_data_header_t p_header = { .boot_duration = boot_duration, .p_buffer_len = P_BUFFER_LEN, };
-	if (SD_WriteBuffer(p_file_path, (void*)&p_header, sizeof(p_data_header_t)) != HAL_OK)
-	{
-		return HAL_ERROR;
-	}
-
-	return HAL_OK;
-}
-
 HAL_StatusTypeDef SD_FlushLog(void)
 {
 	if (sd_log_write_index == 0)
+	{
 		return HAL_OK;
+	}
 
 	if (SD_WriteBuffer(log_file_path, (void*)sd_log, sd_log_write_index) != HAL_OK)
 	{
@@ -214,12 +200,24 @@ HAL_StatusTypeDef SD_FlushLog(void)
 	return HAL_OK;
 }
 
-HAL_StatusTypeDef SD_IncrementPage(void)
+HAL_StatusTypeDef SD_NewPage(uint8_t init)
 {
-	page_num++;
+	if (init == 0)
+	{
+		page_num++;
+	}
 	if (SD_UpdateFilepaths() != HAL_OK)
 	{
 		return HAL_ERROR;
 	}
+	if (SD_WriteBuffer(a_file_path, (void*)&a_header, sizeof(a_data_header_t)) != HAL_OK)
+	{
+		return HAL_ERROR;
+	}
+	if (SD_WriteBuffer(p_file_path, (void*)&p_header, sizeof(p_data_header_t)) != HAL_OK)
+	{
+		return HAL_ERROR;
+	}
+	printf("(%lu) Page %li (\"%s\", \"%s\")\r\n", HAL_GetTick(), page_num, a_file_path, p_file_path);
 	return HAL_OK;
 }

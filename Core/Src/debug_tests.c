@@ -115,5 +115,5 @@ void Debug_test_print_a(volatile a_data_point_t *buffer)
 
 void Debug_test_print_p(volatile p_data_point_t *buffer)
 {
-	printf("(%lu) idk what to print here at %.3f km/h\r\n", buffer[0].timestamp, buffer[0].speed);
+	printf("(%lu) idk what to print here at %.3f km/h\r\n", HAL_GetTick(), buffer[0].speed);
 }
