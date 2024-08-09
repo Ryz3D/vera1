@@ -24,6 +24,11 @@
 
 #define SD_LOG_LEN 512
 
+typedef enum
+{
+	DATA_TYPE_BINARY, DATA_TYPE_A_HEADER, DATA_TYPE_A_DATA, DATA_TYPE_P_HEADER, DATA_TYPE_P_DATA,
+} data_type_t;
+
 extern int32_t dir_num, page_num;
 extern uint16_t sd_year, sd_month, sd_day;
 extern TCHAR dir_path[];
@@ -39,7 +44,7 @@ extern p_data_header_t p_header;
 HAL_StatusTypeDef SD_Init(uint8_t do_format);
 HAL_StatusTypeDef SD_Uninit(void);
 HAL_StatusTypeDef SD_TouchFile(TCHAR *path);
-HAL_StatusTypeDef SD_WriteBuffer(TCHAR *path, void *data, uint32_t size);
+HAL_StatusTypeDef SD_WriteBuffer(TCHAR *path, void *data, uint32_t size, data_type_t data_type);
 HAL_StatusTypeDef SD_FlushLog(void);
 HAL_StatusTypeDef SD_NewPage(uint8_t init);
 

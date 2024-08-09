@@ -62,8 +62,6 @@ void Error_Handler(void);
 #define USER_Btn_GPIO_Port GPIOC
 #define RMII_MDC_Pin GPIO_PIN_1
 #define RMII_MDC_GPIO_Port GPIOC
-#define RMII_REF_CLK_Pin GPIO_PIN_1
-#define RMII_REF_CLK_GPIO_Port GPIOA
 #define RMII_MDIO_Pin GPIO_PIN_2
 #define RMII_MDIO_GPIO_Port GPIOA
 #define RMII_CRS_DV_Pin GPIO_PIN_7

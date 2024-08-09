@@ -61,7 +61,9 @@ TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
 
+UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
+DMA_HandleTypeDef hdma_usart1_rx;
 
 /* USER CODE BEGIN PV */
 FIR_t hfir_pz[PIEZO_COUNT];
@@ -95,6 +97,12 @@ volatile uint8_t flag_complete_a_pz = 0;
 volatile uint8_t flag_complete_p_gps = 0;
 
 const char *str_sd_log_error = "ERROR: sd_flush_log failed\r\n";
+
+char gps_buffer;
+char gps_rx_buffer[1000];
+uint16_t gps_write_index = 0;
+char gps_line_buffer[1000];
+uint16_t gps_read_line = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -109,6 +117,7 @@ static void MX_ADC1_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_DAC_Init(void);
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 void switch_buffers(void **buffer_current, void *buffer_1, void *buffer_2, volatile uint8_t *flag_save_buffer_1, volatile uint8_t *flag_save_buffer_2, volatile uint8_t *flag_overflow);
 void a_buffer_write_inc(void);
@@ -157,6 +166,7 @@ int main(void)
 	MX_TIM3_Init();
 	MX_TIM4_Init();
 	MX_DAC_Init();
+	MX_USART1_UART_Init();
 	/* USER CODE BEGIN 2 */
 	HAL_Delay(1);
 
@@ -213,6 +223,15 @@ int main(void)
 		printf("(%lu) ERROR: main: ADC1 HAL_ADC_Start_DMA failed\r\n", HAL_GetTick());
 		Error_Handler();
 	}
+	// Start GPS UART
+	// TODO: 115200 baud
+	// UBX-CFG-PRT
+	// UBX-CFG-RATE
+	if (HAL_UART_Receive_DMA(&huart1, (uint8_t*)&gps_buffer, 1) != HAL_OK)
+	{
+		printf("(%lu) ERROR: main: USART1 HAL_UART_Receive_DMA failed\r\n", HAL_GetTick());
+		Error_Handler();
+	}
 	// Start oversampling timer
 	if (HAL_TIM_Base_Start_IT(&htim2) != HAL_OK)
 	{
@@ -246,6 +265,7 @@ int main(void)
 	// Offset so page change doesn't happen simultaneously with buffer save, otherwise some files contain one buffer more than the others
 	last_page_change = HAL_GetTick() - 181;
 
+	printf("(%lu) Page %li (\"%s\", \"%s\")\r\n", HAL_GetTick(), page_num, a_file_path, p_file_path);
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 	capture_running = 1;
 	/* USER CODE END 2 */
@@ -261,7 +281,7 @@ int main(void)
 		if (flag_save_a_buffer_1)
 		{
 			DEBUG_A_BUFFER_1_SD
-			if (SD_WriteBuffer(a_file_path, (void*)a_buffer_1, sizeof(a_buffer_1)) != HAL_OK)
+			if (SD_WriteBuffer(a_file_path, (void*)a_buffer_1, sizeof(a_buffer_1), DATA_TYPE_A_DATA) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -276,7 +296,7 @@ int main(void)
 		if (flag_save_a_buffer_2)
 		{
 			DEBUG_A_BUFFER_2_SD
-			if (SD_WriteBuffer(a_file_path, (void*)a_buffer_2, sizeof(a_buffer_2)) != HAL_OK)
+			if (SD_WriteBuffer(a_file_path, (void*)a_buffer_2, sizeof(a_buffer_2), DATA_TYPE_A_DATA) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -287,6 +307,7 @@ int main(void)
 			flag_save_a_buffer_2 = 0;
 			DEBUG_A_BUFFER_2_SD
 		}
+		// a_buffer overflow
 		if (flag_overflow_a_buffer)
 		{
 			printf("(%lu) WARNING: main: a_buffer overflow\r\n", HAL_GetTick());
@@ -296,7 +317,7 @@ int main(void)
 		if (flag_save_p_buffer_1)
 		{
 			DEBUG_P_BUFFER_1_SD
-			if (SD_WriteBuffer(p_file_path, (void*)p_buffer_1, sizeof(p_buffer_1)) != HAL_OK)
+			if (SD_WriteBuffer(p_file_path, (void*)p_buffer_1, sizeof(p_buffer_1), DATA_TYPE_P_DATA) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -311,7 +332,7 @@ int main(void)
 		if (flag_save_p_buffer_2)
 		{
 			DEBUG_P_BUFFER_2_SD
-			if (SD_WriteBuffer(p_file_path, (void*)p_buffer_2, sizeof(p_buffer_2)) != HAL_OK)
+			if (SD_WriteBuffer(p_file_path, (void*)p_buffer_2, sizeof(p_buffer_2), DATA_TYPE_P_DATA) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -322,14 +343,48 @@ int main(void)
 			flag_save_p_buffer_2 = 0;
 			DEBUG_P_BUFFER_2_SD
 		}
+		// p_buffer overflow
 		if (flag_overflow_p_buffer)
 		{
 			printf("(%lu) WARNING: main: p_buffer overflow\r\n", HAL_GetTick());
 		}
 
+		// Handle GPS data
+		if (gps_read_line)
+		{
+			/*
+			 $Talker ID+GGA	Global Positioning System Fixed Data
+			 $Talker ID+GLL	! Geographic Position—Latitude and Longitude
+			 $Talker ID+GSA	GNSS DOP and active satellites
+			 $Talker ID+GSV	GNSS satellites in view
+			 $Talker ID+RMC	Recommended minimum specific GPS data
+			 $Talker ID+VTG	! Course over ground and ground speed
+			 */
+			char test_for[] = "GLL";
+			if (gps_line_buffer[0] == '$' && gps_line_buffer[1] == 'G' && gps_line_buffer[3] == test_for[0] && gps_line_buffer[4] == test_for[1] && gps_line_buffer[5] == test_for[2])
+			{
+				float f1, f2, f3;
+				char c1, c2;
+				int i1;
+				sscanf(gps_line_buffer, "$GNGLL,%f,%c,%f,%c,%f,A,A*%i", &f1, &c1, &f2, &c2, &f3, &i1);
+				f1 /= 100;
+				f2 /= 100;
+				printf("(%lu) %s\r\n", HAL_GetTick(), gps_line_buffer);
+				printf("\t%f %c\t%f %c\r\n", f1, c1, f2, c2);
+				p_buffer_current[p_write_index].lat = f1;
+				p_buffer_current[p_write_index].lon = f2;
+				flag_complete_p_gps = 1;
+				p_buffer_write_inc();
+			}
+			gps_read_line = 0;
+		}
+
 		if (HAL_GetTick() - last_page_change > PAGE_DURATION_MS)
 		{
 			SD_NewPage(0);
+#if DEBUG_TEST_PRINT_NEW_PAGE
+			printf("(%lu) Page %li (\"%s\", \"%s\")\r\n", HAL_GetTick(), page_num, a_file_path, p_file_path);
+#endif
 			last_page_change = HAL_GetTick();
 		}
 		if (SD_FlushLog() != HAL_OK)
@@ -347,11 +402,11 @@ int main(void)
 	HAL_ADC_Stop_IT(&hadc1);
 
 	// Save remaining data
-	if (SD_WriteBuffer(a_file_path, (void*)a_buffer_current, a_write_index * sizeof(a_data_point_t)) != HAL_OK)
+	if (SD_WriteBuffer(a_file_path, (void*)a_buffer_current, a_write_index * sizeof(a_data_point_t), DATA_TYPE_A_DATA) != HAL_OK)
 	{
 		Error_Handler();
 	}
-	if (SD_WriteBuffer(p_file_path, (void*)p_buffer_current, p_write_index * sizeof(p_data_point_t)) != HAL_OK)
+	if (SD_WriteBuffer(p_file_path, (void*)p_buffer_current, p_write_index * sizeof(p_data_point_t), DATA_TYPE_P_DATA) != HAL_OK)
 	{
 		Error_Handler();
 	}
@@ -380,6 +435,10 @@ void SystemClock_Config(void)
 	RCC_OscInitTypeDef RCC_OscInitStruct = { 0 };
 	RCC_ClkInitTypeDef RCC_ClkInitStruct = { 0 };
 
+	/** Configure LSE Drive Capability
+	 */
+	HAL_PWR_EnableBkUpAccess();
+
 	/** Configure the main internal regulator output voltage
 	 */
 	__HAL_RCC_PWR_CLK_ENABLE();
@@ -388,12 +447,11 @@ void SystemClock_Config(void)
 	/** Initializes the RCC Oscillators according to the specified parameters
 	 * in the RCC_OscInitTypeDef structure.
 	 */
-	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-	RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-	RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+	RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+	RCC_OscInitStruct.HSEState = RCC_HSE_ON;
 	RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-	RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-	RCC_OscInitStruct.PLL.PLLM = 8;
+	RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+	RCC_OscInitStruct.PLL.PLLM = 4;
 	RCC_OscInitStruct.PLL.PLLN = 216;
 	RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
 	RCC_OscInitStruct.PLL.PLLQ = 9;
@@ -758,6 +816,43 @@ static void MX_TIM4_Init(void)
 }
 
 /**
+ * @brief USART1 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_USART1_UART_Init(void)
+{
+
+	/* USER CODE BEGIN USART1_Init 0 */
+
+	/* USER CODE END USART1_Init 0 */
+
+	/* USER CODE BEGIN USART1_Init 1 */
+
+	/* USER CODE END USART1_Init 1 */
+	huart1.Instance = USART1;
+	huart1.Init.BaudRate = 9600;
+	huart1.Init.WordLength = UART_WORDLENGTH_8B;
+	huart1.Init.StopBits = UART_STOPBITS_1;
+	huart1.Init.Parity = UART_PARITY_NONE;
+	huart1.Init.Mode = UART_MODE_TX_RX;
+	huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+	huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+	huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_RXINVERT_INIT | UART_ADVFEATURE_RXOVERRUNDISABLE_INIT;
+	huart1.AdvancedInit.RxPinLevelInvert = UART_ADVFEATURE_RXINV_ENABLE;
+	huart1.AdvancedInit.OverrunDisable = UART_ADVFEATURE_OVERRUN_DISABLE;
+	if (HAL_UART_Init(&huart1) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	/* USER CODE BEGIN USART1_Init 2 */
+
+	/* USER CODE END USART1_Init 2 */
+
+}
+
+/**
  * @brief USART3 Initialization Function
  * @param None
  * @retval None
@@ -805,6 +900,9 @@ static void MX_DMA_Init(void)
 	/* DMA2_Stream0_IRQn interrupt configuration */
 	HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
 	HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+	/* DMA2_Stream2_IRQn interrupt configuration */
+	HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, 0, 0);
+	HAL_NVIC_EnableIRQ(DMA2_Stream2_IRQn);
 	/* DMA2_Stream3_IRQn interrupt configuration */
 	HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 0, 0);
 	HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
@@ -864,8 +962,8 @@ static void MX_GPIO_Init(void)
 	GPIO_InitStruct.Alternate = GPIO_AF11_ETH;
 	HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-	/*Configure GPIO pins : RMII_REF_CLK_Pin RMII_MDIO_Pin RMII_CRS_DV_Pin */
-	GPIO_InitStruct.Pin = RMII_REF_CLK_Pin | RMII_MDIO_Pin | RMII_CRS_DV_Pin;
+	/*Configure GPIO pins : RMII_MDIO_Pin RMII_CRS_DV_Pin */
+	GPIO_InitStruct.Pin = RMII_MDIO_Pin | RMII_CRS_DV_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
@@ -948,6 +1046,14 @@ static void MX_GPIO_Init(void)
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
 	GPIO_InitStruct.Alternate = GPIO_AF11_ETH;
 	HAL_GPIO_Init(RMII_TXD0_GPIO_Port, &GPIO_InitStruct);
+
+	/*Configure GPIO pins : PB8 PB9 */
+	GPIO_InitStruct.Pin = GPIO_PIN_8 | GPIO_PIN_9;
+	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+	GPIO_InitStruct.Alternate = GPIO_AF7_UART5;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
 	/* USER CODE BEGIN MX_GPIO_Init_2 */
 	/* USER CODE END MX_GPIO_Init_2 */
@@ -1065,8 +1171,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	{
 		DEBUG_P_TIMER
 
-		flag_complete_p_gps = 1;
-		p_buffer_write_inc();
+		// flag_complete_p_gps = 1;
+		// p_buffer_write_inc();
 
 		DEBUG_P_TIMER
 	}
@@ -1104,6 +1210,37 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 
 			DEBUG_ADC_PZ_CONV
 		}
+	}
+}
+
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+{
+	HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+	if (huart->Instance == USART1)
+	{
+		if (gps_buffer == '\n')
+		{
+			if (gps_write_index != 0)
+			{
+				memcpy(gps_line_buffer, gps_rx_buffer, gps_write_index);
+				gps_line_buffer[gps_write_index] = '\0';
+				gps_read_line = 1;
+				gps_write_index = 0;
+			}
+		}
+		else
+		{
+			if (gps_buffer == '$' || gps_write_index == sizeof(gps_rx_buffer))
+			{
+				gps_write_index = 0;
+			}
+			gps_rx_buffer[gps_write_index++] = gps_buffer;
+		}
+		HAL_UART_Receive_DMA(&huart1, (uint8_t*)&gps_buffer, 1);
 	}
 }
 /* USER CODE END 4 */

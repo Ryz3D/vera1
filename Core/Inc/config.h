@@ -8,6 +8,14 @@
 #ifndef INC_CONFIG_H_
 #define INC_CONFIG_H_
 
+typedef enum
+{
+	FILE_FORMAT_BINARY, FILE_FORMAT_CSV,
+} file_format_t;
+
+// File format
+// default: FILE_FORMAT_BINARY
+#define FILE_FORMAT 1
 // Sampling rate = 4 kSa/s * OVERSAMPLING_RATIO
 // default: 4 -> 16 kSa/s
 #define OVERSAMPLING_RATIO 4
@@ -26,7 +34,7 @@
 #define P_BUFFER_LEN 128
 // Duration before switching to next page (file) in milliseconds
 // default: 10 * 60 * 1000
-#define PAGE_DURATION_MS 1000
+#define PAGE_DURATION_MS 1 * 60 * 1000
 
 #define DEBUG1 HAL_GPIO_TogglePin(Debug1_GPIO_Port, Debug1_Pin);
 #define DEBUG2 HAL_GPIO_TogglePin(Debug2_GPIO_Port, Debug2_Pin);
@@ -48,11 +56,12 @@
 #define DEBUG_P_TIMER ;
 
 #define DEBUG_TEST_PRINT_CONFIG 1
-#define DEBUG_TEST_ALWAYS_FORMAT_SD 1
+#define DEBUG_TEST_ALWAYS_FORMAT_SD 0
 #define DEBUG_TEST_NEVER_FORMAT_SD 0
 #define DEBUG_TEST_FIR_FREQUENCY_SWEEP 0
 #define DEBUG_TEST_FIR_DAC 1
-#define DEBUG_TEST_PRINT_A 1
-#define DEBUG_TEST_PRINT_P 1
+#define DEBUG_TEST_PRINT_A 0
+#define DEBUG_TEST_PRINT_P 0
+#define DEBUG_TEST_PRINT_NEW_PAGE 0
 
 #endif /* INC_CONFIG_H_ */
