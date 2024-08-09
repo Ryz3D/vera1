@@ -74,6 +74,11 @@ HAL_StatusTypeDef SD_Init(uint8_t do_format)
 		}
 	}
 
+	return HAL_OK;
+}
+
+HAL_StatusTypeDef SD_InitDir(void)
+{
 	DIR dir_root;
 	if (f_opendir(&dir_root, "") != FR_OK)
 	{
@@ -81,7 +86,7 @@ HAL_StatusTypeDef SD_Init(uint8_t do_format)
 		return HAL_ERROR;
 	}
 	FILINFO file_info;
-	int32_t dir_num = -1;
+	dir_num = -1;
 	while (f_readdir(&dir_root, &file_info) == FR_OK)
 	{
 		if (file_info.fname[0] == '\0')
@@ -106,7 +111,6 @@ HAL_StatusTypeDef SD_Init(uint8_t do_format)
 	FRESULT res;
 	if ((res = f_mkdir(dir_path)) != FR_OK)
 	{
-		printf("error %u\r\n", res);
 		printf("(%lu) ERROR: SD_Init: Create dir (\"%s\") failed\r\n", HAL_GetTick(), dir_path);
 		return HAL_ERROR;
 	}
@@ -134,6 +138,43 @@ HAL_StatusTypeDef SD_Init(uint8_t do_format)
 	return HAL_OK;
 }
 
+HAL_StatusTypeDef SD_FlushLog(void)
+{
+	if (sd_log_write_index == 0)
+	{
+		return HAL_OK;
+	}
+
+	if (SD_WriteBuffer(log_file_path, (void*)sd_log, sd_log_write_index) != HAL_OK)
+	{
+		return HAL_ERROR;
+	}
+	sd_log_write_index = 0;
+
+	return HAL_OK;
+}
+
+HAL_StatusTypeDef SD_NewPage(uint8_t init)
+{
+	if (init == 0)
+	{
+		page_num++;
+	}
+	if (SD_UpdateFilepaths() != HAL_OK)
+	{
+		return HAL_ERROR;
+	}
+	if (SD_WriteBuffer(a_file_path, (void*)&a_header, sizeof(a_data_header_t)) != HAL_OK)
+	{
+		return HAL_ERROR;
+	}
+	if (SD_WriteBuffer(p_file_path, (void*)&p_header, sizeof(p_data_header_t)) != HAL_OK)
+	{
+		return HAL_ERROR;
+	}
+	return HAL_OK;
+}
+
 HAL_StatusTypeDef SD_Uninit(void)
 {
 	f_close(&SDFile);
@@ -153,7 +194,48 @@ HAL_StatusTypeDef SD_TouchFile(TCHAR *path)
 	return HAL_OK;
 }
 
-HAL_StatusTypeDef SD_WriteBuffer(TCHAR *path, void *data, uint32_t size, data_type_t data_type)
+uint8_t SD_FileExists(TCHAR *path)
+{
+	if (f_open(&SDFile, path, FA_OPEN_EXISTING | FA_READ) != FR_OK)
+	{
+		return 0;
+	}
+	f_close(&SDFile);
+
+	return 1;
+}
+
+HAL_StatusTypeDef SD_ReadBuffer(TCHAR *path, void *data, UINT size, UINT *size_read)
+{
+	if (size == 0)
+	{
+		return HAL_OK;
+	}
+
+	if (f_open(&SDFile, path, FA_OPEN_EXISTING | FA_READ) != FR_OK)
+	{
+		printf("(%lu) ERROR: SD_ReadBuffer: SD File \"%s\": file open failed\r\n", HAL_GetTick(), path);
+		return HAL_ERROR;
+	}
+
+	FRESULT res = f_read(&SDFile, data, size, size_read);
+	if (res != FR_OK)
+	{
+		printf("(%lu) ERROR: SD_ReadBuffer: SD File \"%s\": file read failed\r\n", HAL_GetTick(), path);
+		f_close(&SDFile);
+		return HAL_ERROR;
+	}
+
+	if (f_close(&SDFile) != FR_OK)
+	{
+		printf("(%lu) ERROR: SD_ReadBuffer: SD File \"%s\": file close failed\r\n", HAL_GetTick(), path);
+		return HAL_ERROR;
+	}
+
+	return HAL_OK;
+}
+
+HAL_StatusTypeDef SD_WriteBuffer(TCHAR *path, void *data, UINT size)
 {
 	if (size == 0)
 	{
@@ -167,7 +249,6 @@ HAL_StatusTypeDef SD_WriteBuffer(TCHAR *path, void *data, uint32_t size, data_ty
 	}
 
 	UINT bytes_written;
-#if FILE_FORMAT == 0
 	FRESULT res = f_write(&SDFile, data, size, &bytes_written);
 	if (res != FR_OK || bytes_written != size)
 	{
@@ -175,90 +256,6 @@ HAL_StatusTypeDef SD_WriteBuffer(TCHAR *path, void *data, uint32_t size, data_ty
 		f_close(&SDFile);
 		return HAL_ERROR;
 	}
-#elif FILE_FORMAT == 1
-	if (data_type == DATA_TYPE_BINARY)
-	{
-		FRESULT res = f_write(&SDFile, data, size, &bytes_written);
-		if (res != FR_OK || bytes_written != size)
-		{
-			printf("(%lu) ERROR: SD_WriteBuffer: SD File \"%s\": file write failed (%hu / %lu bytes)\r\n", HAL_GetTick(), path, bytes_written, size);
-			f_close(&SDFile);
-			return HAL_ERROR;
-		}
-	}
-	else
-	{
-		uint16_t element_size = 0;
-		switch (data_type)
-		{
-		case DATA_TYPE_BINARY:
-			break;
-		case DATA_TYPE_A_DATA:
-			element_size = sizeof(a_data_point_t);
-			break;
-		case DATA_TYPE_A_HEADER:
-			element_size = sizeof(a_data_header_t);
-			break;
-		case DATA_TYPE_P_DATA:
-			element_size = sizeof(p_data_point_t);
-			break;
-		case DATA_TYPE_P_HEADER:
-			element_size = sizeof(p_data_header_t);
-			break;
-		}
-		/*
-		 digits
-		 uint32: 10
-		 int32: 11
-		 uint16: 5
-		 int16: 6
-		 uint8: 3
-		 int8: 4
-		 -> a_data_point_t: 81 + 6 separators
-		 */
-		char csv_buffer[87];
-		for (uint32_t i = 0; i <= size - element_size; i += element_size)
-		{
-			switch (data_type)
-			{
-			case DATA_TYPE_BINARY:
-				break;
-			case DATA_TYPE_A_HEADER:
-				element_size = sizeof(a_data_header_t);
-				break;
-			case DATA_TYPE_A_DATA:
-				a_data_point_t *e = (a_data_point_t*)(data + i);
-				uint32_t len = 0;
-				len += sprintf(csv_buffer, "%u,%lu,%hu,%li,%li,%li", e->complete, e->timestamp, e->temp_mems1, e->x_mems1, e->y_mems1, e->z_mems1);
-				for (uint8_t ch = 0; ch < PIEZO_COUNT; ch++)
-				{
-					len += sprintf(csv_buffer + len, "%hi", e->a_piezo[ch]);
-					if (ch < PIEZO_COUNT - 1)
-					{
-						csv_buffer[len] = ',';
-						len++;
-					}
-				}
-				sprintf(csv_buffer + len, "\r\n");
-				element_size = sizeof(a_data_point_t);
-				break;
-			case DATA_TYPE_P_HEADER:
-				element_size = sizeof(p_data_header_t);
-				break;
-			case DATA_TYPE_P_DATA:
-				element_size = sizeof(p_data_point_t);
-				break;
-			}
-			FRESULT res = f_write(&SDFile, csv_buffer, strlen(csv_buffer), &bytes_written);
-			if (res != FR_OK || bytes_written != strlen(csv_buffer))
-			{
-				printf("(%lu) ERROR: SD_WriteBuffer: SD File \"%s\": file write failed (%hu / %u bytes)\r\n", HAL_GetTick(), path, bytes_written, strlen(csv_buffer));
-				f_close(&SDFile);
-				return HAL_ERROR;
-			}
-		}
-	}
-#endif
 
 	if (f_close(&SDFile) != FR_OK)
 	{
@@ -266,42 +263,5 @@ HAL_StatusTypeDef SD_WriteBuffer(TCHAR *path, void *data, uint32_t size, data_ty
 		return HAL_ERROR;
 	}
 
-	return HAL_OK;
-}
-
-HAL_StatusTypeDef SD_FlushLog(void)
-{
-	if (sd_log_write_index == 0)
-	{
-		return HAL_OK;
-	}
-
-	if (SD_WriteBuffer(log_file_path, (void*)sd_log, sd_log_write_index, DATA_TYPE_BINARY) != HAL_OK)
-	{
-		return HAL_ERROR;
-	}
-	sd_log_write_index = 0;
-
-	return HAL_OK;
-}
-
-HAL_StatusTypeDef SD_NewPage(uint8_t init)
-{
-	if (init == 0)
-	{
-		page_num++;
-	}
-	if (SD_UpdateFilepaths() != HAL_OK)
-	{
-		return HAL_ERROR;
-	}
-	if (SD_WriteBuffer(a_file_path, (void*)&a_header, sizeof(a_data_header_t), DATA_TYPE_A_HEADER) != HAL_OK)
-	{
-		return HAL_ERROR;
-	}
-	if (SD_WriteBuffer(p_file_path, (void*)&p_header, sizeof(p_data_header_t), DATA_TYPE_P_HEADER) != HAL_OK)
-	{
-		return HAL_ERROR;
-	}
 	return HAL_OK;
 }

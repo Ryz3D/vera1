@@ -9,12 +9,23 @@
 
 void Debug_test_print_config()
 {
-	printf("(%lu) Config: ", HAL_GetTick());
-	printf("OVERSAMPLING_RATIO=%i ", OVERSAMPLING_RATIO);
-	printf("PIEZO_CHANNEL_COUNT=%i ", PIEZO_CHANNEL_COUNT);
-	printf("PIEZO_COUNT=%i ", PIEZO_COUNT);
-	printf("A_BUFFER_LEN=%i ", A_BUFFER_LEN);
-	printf("P_BUFFER_LEN=%i\r\n", P_BUFFER_LEN);
+	printf("(%lu) Compiled Config:\r\n", HAL_GetTick());
+	printf("    VERSION=%u\r\n", VERSION);
+	printf("    LOAD_CONFIG=%u\r\n", LOAD_CONFIG);
+	printf("    OVERSAMPLING_RATIO_MAX=%u\r\n", OVERSAMPLING_RATIO_MAX);
+	printf("    PIEZO_COUNT_MAX=%u\r\n", PIEZO_COUNT_MAX);
+	printf("    A_BUFFER_LEN_MAX=%u\r\n", A_BUFFER_LEN_MAX);
+	printf("    P_BUFFER_LEN_MAX=%u\r\n", P_BUFFER_LEN_MAX);
+	char config_buffer[500];
+	Config_Save(config_buffer, sizeof(config_buffer));
+	printf("(%lu) Loaded Config:\r\n    ", HAL_GetTick());
+	for (uint32_t i = 0; i < strlen(config_buffer); i++)
+	{
+		if (config_buffer[i] == '\n' && i < strlen(config_buffer) - 1)
+			printf("\n    ");
+		else
+			printf("%c", config_buffer[i]);
+	}
 }
 
 void Debug_test_FIR_frequency_sweep(FIR_t *hfir)
@@ -99,7 +110,7 @@ void Debug_test_print_a(volatile a_data_point_t *buffer)
 	uint8_t ch = 0;
 	int16_t pz_min = 5000, pz_max = -5000;
 	int32_t mems_min = 1000000000, mems_max = -1000000000;
-	for (uint16_t i = 0; i < A_BUFFER_LEN; i++)
+	for (uint16_t i = 0; i < config.a_buffer_len; i++)
 	{
 		pz_min = buffer[i].a_piezo[ch] < pz_min ? buffer[i].a_piezo[ch] : pz_min;
 		pz_max = buffer[i].a_piezo[ch] > pz_max ? buffer[i].a_piezo[ch] : pz_max;

@@ -15,19 +15,15 @@
 #include "fatfs.h"
 #include "data_points.h"
 
+#define CONFIG_FILE_PATH "config.txt"
 #define DIR_FORMAT "%04hu_%02hu_%02hu-%li"
-#define A_FILE_FORMAT DIR_FORMAT "/A_%li.BIN"
-#define P_FILE_FORMAT DIR_FORMAT "/P_%li.BIN"
-#define LOG_FILE_FORMAT DIR_FORMAT "/_LOG.TXT"
+#define A_FILE_FORMAT DIR_FORMAT "/a_%li.bin"
+#define P_FILE_FORMAT DIR_FORMAT "/p_%li.bin"
+#define LOG_FILE_FORMAT DIR_FORMAT "/_log.txt"
 
 #define PATH_LEN 50
 
 #define SD_LOG_LEN 512
-
-typedef enum
-{
-	DATA_TYPE_BINARY, DATA_TYPE_A_HEADER, DATA_TYPE_A_DATA, DATA_TYPE_P_HEADER, DATA_TYPE_P_DATA,
-} data_type_t;
 
 extern int32_t dir_num, page_num;
 extern uint16_t sd_year, sd_month, sd_day;
@@ -42,10 +38,13 @@ extern a_data_header_t a_header;
 extern p_data_header_t p_header;
 
 HAL_StatusTypeDef SD_Init(uint8_t do_format);
-HAL_StatusTypeDef SD_Uninit(void);
-HAL_StatusTypeDef SD_TouchFile(TCHAR *path);
-HAL_StatusTypeDef SD_WriteBuffer(TCHAR *path, void *data, uint32_t size, data_type_t data_type);
+HAL_StatusTypeDef SD_InitDir(void);
 HAL_StatusTypeDef SD_FlushLog(void);
 HAL_StatusTypeDef SD_NewPage(uint8_t init);
+HAL_StatusTypeDef SD_Uninit(void);
+HAL_StatusTypeDef SD_TouchFile(TCHAR *path);
+uint8_t SD_FileExists(TCHAR *path);
+HAL_StatusTypeDef SD_ReadBuffer(TCHAR *path, void *data, UINT size, UINT *size_read);
+HAL_StatusTypeDef SD_WriteBuffer(TCHAR *path, void *data, UINT size);
 
 #endif /* INC_SD_H_ */

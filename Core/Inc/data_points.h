@@ -19,8 +19,11 @@
 
 typedef struct
 {
+	uint8_t version;
 	uint32_t boot_duration;
 	uint32_t a_buffer_len;
+	uint32_t a_sampling_rate;
+	uint8_t piezo_count_max;
 	uint8_t piezo_count;
 	uint8_t oversampling_ratio;
 	uint32_t fir_taps_len;
@@ -34,13 +37,15 @@ typedef struct
 	int32_t x_mems1;
 	int32_t y_mems1;
 	int32_t z_mems1;
-	int16_t a_piezo[PIEZO_COUNT];
+	int16_t a_piezo[PIEZO_COUNT_MAX];
 } a_data_point_t;
 
 typedef struct
 {
+	uint8_t version;
 	uint32_t boot_duration;
 	uint32_t p_buffer_len;
+	uint32_t p_sampling_rate;
 } p_data_header_t;
 
 typedef struct

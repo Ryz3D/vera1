@@ -66,20 +66,20 @@ UART_HandleTypeDef huart3;
 DMA_HandleTypeDef hdma_usart1_rx;
 
 /* USER CODE BEGIN PV */
-FIR_t hfir_pz[PIEZO_COUNT];
+FIR_t hfir_pz[PIEZO_COUNT_MAX];
 uint32_t last_page_change = 0;
 
 volatile uint8_t capture_running = 0;
 volatile uint32_t ticks_counter = 0;
 
-volatile uint16_t pz_dma_buffer[PIEZO_CHANNEL_COUNT * OVERSAMPLING_RATIO];
+volatile uint16_t pz_dma_buffer[PIEZO_COUNT_MAX * OVERSAMPLING_RATIO_MAX];
 
 // TODO: are these volatile???
-volatile a_data_point_t a_buffer_1[A_BUFFER_LEN];
-volatile a_data_point_t a_buffer_2[A_BUFFER_LEN];
+volatile a_data_point_t a_buffer_1[A_BUFFER_LEN_MAX];
+volatile a_data_point_t a_buffer_2[A_BUFFER_LEN_MAX];
 volatile a_data_point_t *a_buffer_current = a_buffer_1;
-volatile p_data_point_t p_buffer_1[P_BUFFER_LEN];
-volatile p_data_point_t p_buffer_2[P_BUFFER_LEN];
+volatile p_data_point_t p_buffer_1[P_BUFFER_LEN_MAX];
+volatile p_data_point_t p_buffer_2[P_BUFFER_LEN_MAX];
 volatile p_data_point_t *p_buffer_current = p_buffer_1;
 
 volatile uint32_t a_write_index = 0;
@@ -170,23 +170,10 @@ int main(void)
 	/* USER CODE BEGIN 2 */
 	HAL_Delay(1);
 
-	printf("(%lu) Booting...\r\n", HAL_GetTick());
-#if DEBUG_TEST_PRINT_CONFIG
-	Debug_test_print_config();
-#endif
-
 	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
-
-	// Init FIR filter
-	for (uint8_t i_ch = 0; i_ch < PIEZO_COUNT; i_ch++)
-	{
-		FIR_Init(&hfir_pz[i_ch], fir_taps);
-	}
-
-	a_buffer_1[0].timestamp = 0;
-	p_buffer_1[0].timestamp = 0;
+	printf("(%lu) Booting...\r\n", HAL_GetTick());
 
 #if DEBUG_TEST_NEVER_FORMAT_SD == 0
 	uint8_t do_format_sd = DEBUG_TEST_ALWAYS_FORMAT_SD;
@@ -200,14 +187,72 @@ int main(void)
 		HAL_Delay(100);
 		HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
 	}
-	sd_year = 2024;
-	sd_month = 8;
-	sd_day = 7;
+#endif
 	if (SD_Init(do_format_sd) != HAL_OK)
 	{
 		Error_Handler();
 	}
+
+	Config_Default();
+#if LOAD_CONFIG
+	char config_buffer[500];
+	if (SD_FileExists(CONFIG_FILE_PATH))
+	{
+		printf("(%lu) Config found, reading...\r\n", HAL_GetTick());
+		UINT config_buffer_size = 0;
+		if (SD_ReadBuffer(CONFIG_FILE_PATH, config_buffer, sizeof(config_buffer), &config_buffer_size) != HAL_OK)
+		{
+			Error_Handler();
+		}
+		config_buffer[config_buffer_size] = '\0';
+		Config_Load(config_buffer, strlen(config_buffer));
+	}
+	else
+	{
+		printf("(%lu) No config found, writing default...\r\n", HAL_GetTick());
+		Config_Save(config_buffer, sizeof(config_buffer));
+		if (SD_WriteBuffer(CONFIG_FILE_PATH, config_buffer, strlen(config_buffer)) != HAL_OK)
+		{
+			Error_Handler();
+		}
+	}
 #endif
+
+#if DEBUG_TEST_PRINT_CONFIG
+	Debug_test_print_config();
+#endif
+
+	// TODO: init timers, adc channels
+
+	// Start GPS UART
+	// TODO: 115200 baud
+	// UBX-CFG-PRT
+	// UBX-CFG-RATE
+	if (HAL_UART_Receive_DMA(&huart1, (uint8_t*)&gps_buffer, 1) != HAL_OK)
+	{
+		printf("(%lu) ERROR: main: USART1 HAL_UART_Receive_DMA failed\r\n", HAL_GetTick());
+		Error_Handler();
+	}
+#if DEBUG_TEST_BOOT_WITHOUT_GPS
+	sd_year = 2024;
+	sd_month = 7;
+	sd_day = 18;
+#else
+	// TODO: wait for gps packet, write date
+#endif
+	if (SD_InitDir() != HAL_OK)
+	{
+		Error_Handler();
+	}
+
+	// Init FIR filter
+	for (uint8_t i_ch = 0; i_ch < config.piezo_count; i_ch++)
+	{
+		FIR_Init(&hfir_pz[i_ch], fir_taps);
+	}
+
+	a_buffer_1[0].timestamp = 0;
+	p_buffer_1[0].timestamp = 0;
 
 #if DEBUG_TEST_FIR_FREQUENCY_SWEEP
 	Debug_test_FIR_frequency_sweep(&hfir_pz[0]);
@@ -218,18 +263,9 @@ int main(void)
 #endif
 
 	// Start piezo ADC
-	if (HAL_ADC_Start_DMA(&hadc1, (uint32_t*)pz_dma_buffer, PIEZO_CHANNEL_COUNT * OVERSAMPLING_RATIO) != HAL_OK)
+	if (HAL_ADC_Start_DMA(&hadc1, (uint32_t*)pz_dma_buffer, config.piezo_count * config.oversampling_ratio) != HAL_OK)
 	{
 		printf("(%lu) ERROR: main: ADC1 HAL_ADC_Start_DMA failed\r\n", HAL_GetTick());
-		Error_Handler();
-	}
-	// Start GPS UART
-	// TODO: 115200 baud
-	// UBX-CFG-PRT
-	// UBX-CFG-RATE
-	if (HAL_UART_Receive_DMA(&huart1, (uint8_t*)&gps_buffer, 1) != HAL_OK)
-	{
-		printf("(%lu) ERROR: main: USART1 HAL_UART_Receive_DMA failed\r\n", HAL_GetTick());
 		Error_Handler();
 	}
 	// Start oversampling timer
@@ -254,12 +290,17 @@ int main(void)
 	uint32_t boot_duration = HAL_GetTick();
 	printf("(%lu) Capture started\r\n", boot_duration);
 
-	a_header.a_buffer_len = A_BUFFER_LEN;
+	a_header.version = VERSION;
+	a_header.a_buffer_len = config.a_buffer_len;
+	a_header.a_sampling_rate = config.a_sampling_rate;
 	a_header.boot_duration = boot_duration;
 	a_header.fir_taps_len = FIR_TAPS_LEN;
-	a_header.oversampling_ratio = OVERSAMPLING_RATIO;
-	a_header.piezo_count = PIEZO_COUNT;
-	p_header.p_buffer_len = P_BUFFER_LEN;
+	a_header.oversampling_ratio = config.oversampling_ratio;
+	a_header.piezo_count_max = PIEZO_COUNT_MAX;
+	a_header.piezo_count = config.piezo_count;
+	p_header.version = VERSION;
+	p_header.p_buffer_len = config.p_buffer_len;
+	p_header.p_sampling_rate = config.p_sampling_rate;
 	p_header.boot_duration = boot_duration;
 	SD_NewPage(1);
 	// Offset so page change doesn't happen simultaneously with buffer save, otherwise some files contain one buffer more than the others
@@ -281,7 +322,7 @@ int main(void)
 		if (flag_save_a_buffer_1)
 		{
 			DEBUG_A_BUFFER_1_SD
-			if (SD_WriteBuffer(a_file_path, (void*)a_buffer_1, sizeof(a_buffer_1), DATA_TYPE_A_DATA) != HAL_OK)
+			if (SD_WriteBuffer(a_file_path, (void*)a_buffer_1, config.a_buffer_len * sizeof(a_data_point_t)) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -296,7 +337,7 @@ int main(void)
 		if (flag_save_a_buffer_2)
 		{
 			DEBUG_A_BUFFER_2_SD
-			if (SD_WriteBuffer(a_file_path, (void*)a_buffer_2, sizeof(a_buffer_2), DATA_TYPE_A_DATA) != HAL_OK)
+			if (SD_WriteBuffer(a_file_path, (void*)a_buffer_2, config.a_buffer_len * sizeof(a_data_point_t)) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -317,7 +358,7 @@ int main(void)
 		if (flag_save_p_buffer_1)
 		{
 			DEBUG_P_BUFFER_1_SD
-			if (SD_WriteBuffer(p_file_path, (void*)p_buffer_1, sizeof(p_buffer_1), DATA_TYPE_P_DATA) != HAL_OK)
+			if (SD_WriteBuffer(p_file_path, (void*)p_buffer_1, config.p_buffer_len * sizeof(p_data_point_t)) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -332,7 +373,7 @@ int main(void)
 		if (flag_save_p_buffer_2)
 		{
 			DEBUG_P_BUFFER_2_SD
-			if (SD_WriteBuffer(p_file_path, (void*)p_buffer_2, sizeof(p_buffer_2), DATA_TYPE_P_DATA) != HAL_OK)
+			if (SD_WriteBuffer(p_file_path, (void*)p_buffer_2, config.p_buffer_len * sizeof(p_data_point_t)) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -379,7 +420,7 @@ int main(void)
 			gps_read_line = 0;
 		}
 
-		if (HAL_GetTick() - last_page_change > PAGE_DURATION_MS)
+		if (HAL_GetTick() - last_page_change > config.page_duration_ms)
 		{
 			SD_NewPage(0);
 #if DEBUG_TEST_PRINT_NEW_PAGE
@@ -402,11 +443,11 @@ int main(void)
 	HAL_ADC_Stop_IT(&hadc1);
 
 	// Save remaining data
-	if (SD_WriteBuffer(a_file_path, (void*)a_buffer_current, a_write_index * sizeof(a_data_point_t), DATA_TYPE_A_DATA) != HAL_OK)
+	if (SD_WriteBuffer(a_file_path, (void*)a_buffer_current, a_write_index * sizeof(a_data_point_t)) != HAL_OK)
 	{
 		Error_Handler();
 	}
-	if (SD_WriteBuffer(p_file_path, (void*)p_buffer_current, p_write_index * sizeof(p_data_point_t), DATA_TYPE_P_DATA) != HAL_OK)
+	if (SD_WriteBuffer(p_file_path, (void*)p_buffer_current, p_write_index * sizeof(p_data_point_t)) != HAL_OK)
 	{
 		Error_Handler();
 	}
@@ -432,8 +473,10 @@ int main(void)
  */
 void SystemClock_Config(void)
 {
-	RCC_OscInitTypeDef RCC_OscInitStruct = { 0 };
-	RCC_ClkInitTypeDef RCC_ClkInitStruct = { 0 };
+	RCC_OscInitTypeDef RCC_OscInitStruct = {
+		0 };
+	RCC_ClkInitTypeDef RCC_ClkInitStruct = {
+		0 };
 
 	/** Configure LSE Drive Capability
 	 */
@@ -494,7 +537,8 @@ static void MX_ADC1_Init(void)
 
 	/* USER CODE END ADC1_Init 0 */
 
-	ADC_ChannelConfTypeDef sConfig = { 0 };
+	ADC_ChannelConfTypeDef sConfig = {
+		0 };
 
 	/* USER CODE BEGIN ADC1_Init 1 */
 
@@ -582,7 +626,8 @@ static void MX_DAC_Init(void)
 
 	/* USER CODE END DAC_Init 0 */
 
-	DAC_ChannelConfTypeDef sConfig = { 0 };
+	DAC_ChannelConfTypeDef sConfig = {
+		0 };
 
 	/* USER CODE BEGIN DAC_Init 1 */
 
@@ -690,8 +735,10 @@ static void MX_TIM2_Init(void)
 
 	/* USER CODE END TIM2_Init 0 */
 
-	TIM_ClockConfigTypeDef sClockSourceConfig = { 0 };
-	TIM_MasterConfigTypeDef sMasterConfig = { 0 };
+	TIM_ClockConfigTypeDef sClockSourceConfig = {
+		0 };
+	TIM_MasterConfigTypeDef sMasterConfig = {
+		0 };
 
 	/* USER CODE BEGIN TIM2_Init 1 */
 
@@ -735,8 +782,10 @@ static void MX_TIM3_Init(void)
 
 	/* USER CODE END TIM3_Init 0 */
 
-	TIM_SlaveConfigTypeDef sSlaveConfig = { 0 };
-	TIM_MasterConfigTypeDef sMasterConfig = { 0 };
+	TIM_SlaveConfigTypeDef sSlaveConfig = {
+		0 };
+	TIM_MasterConfigTypeDef sMasterConfig = {
+		0 };
 
 	/* USER CODE BEGIN TIM3_Init 1 */
 
@@ -781,8 +830,10 @@ static void MX_TIM4_Init(void)
 
 	/* USER CODE END TIM4_Init 0 */
 
-	TIM_SlaveConfigTypeDef sSlaveConfig = { 0 };
-	TIM_MasterConfigTypeDef sMasterConfig = { 0 };
+	TIM_SlaveConfigTypeDef sSlaveConfig = {
+		0 };
+	TIM_MasterConfigTypeDef sMasterConfig = {
+		0 };
 
 	/* USER CODE BEGIN TIM4_Init 1 */
 
@@ -919,7 +970,8 @@ static void MX_DMA_Init(void)
  */
 static void MX_GPIO_Init(void)
 {
-	GPIO_InitTypeDef GPIO_InitStruct = { 0 };
+	GPIO_InitTypeDef GPIO_InitStruct = {
+		0 };
 	/* USER CODE BEGIN MX_GPIO_Init_1 */
 	/* USER CODE END MX_GPIO_Init_1 */
 
@@ -1123,7 +1175,7 @@ void a_buffer_write_inc()
 	a_buffer_current[a_write_index].complete |= (1 << A_COMPLETE_TIMESTAMP) | (flag_complete_a_mems << A_COMPLETE_MEMS) | (flag_complete_a_pz << A_COMPLETE_PZ);
 
 	// If next index would overflow
-	if (++a_write_index >= A_BUFFER_LEN)
+	if (++a_write_index >= config.a_buffer_len)
 	{
 		// Switch buffers
 		a_write_index = 0;
@@ -1140,7 +1192,7 @@ void p_buffer_write_inc()
 	p_buffer_current[p_write_index].complete |= (1 << P_COMPLETE_TIMESTAMP) | (flag_complete_p_gps << P_COMPLETE_GPS);
 
 	// If next index would overflow
-	if (++p_write_index >= P_BUFFER_LEN)
+	if (++p_write_index >= config.p_buffer_len)
 	{
 		// Switch buffers
 		p_write_index = 0;
@@ -1187,14 +1239,14 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 		{
 			DEBUG_ADC_PZ_CONV
 
-			for (uint8_t i_sample = 0; i_sample < OVERSAMPLING_RATIO; i_sample++)
+			for (uint8_t i_sample = 0; i_sample < config.oversampling_ratio; i_sample++)
 			{
-				for (uint8_t i_ch = 0; i_ch < PIEZO_COUNT; i_ch++)
+				for (uint8_t i_ch = 0; i_ch < config.piezo_count; i_ch++)
 				{
-					hfir_pz[i_ch].In[i_sample] = (pz_dma_buffer[i_sample * PIEZO_CHANNEL_COUNT + i_ch] << 1) - 4094;
+					hfir_pz[i_ch].In[i_sample] = (pz_dma_buffer[i_sample * config.piezo_count + i_ch] << 1) - 4094;
 				}
 			}
-			for (uint8_t i_ch = 0; i_ch < PIEZO_COUNT; i_ch++)
+			for (uint8_t i_ch = 0; i_ch < config.piezo_count; i_ch++)
 			{
 				FIR_Update(&hfir_pz[i_ch]);
 				a_buffer_current[a_write_index].a_piezo[i_ch] = hfir_pz[i_ch].Out[0];
