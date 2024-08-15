@@ -107,24 +107,24 @@ void Debug_test_FIR_frequency_sweep(FIR_t *hfir)
 
 void Debug_test_print_a(volatile a_data_point_t *buffer)
 {
-	uint8_t ch = 0;
+	uint8_t ch = 1;
 	int16_t pz_min = 5000, pz_max = -5000;
 	int32_t mems_min = 1000000000, mems_max = -1000000000;
 	for (uint16_t i = 0; i < config.a_buffer_len; i++)
 	{
 		pz_min = buffer[i].a_piezo[ch] < pz_min ? buffer[i].a_piezo[ch] : pz_min;
 		pz_max = buffer[i].a_piezo[ch] > pz_max ? buffer[i].a_piezo[ch] : pz_max;
-		mems_min = buffer[i].y_mems1 < pz_min ? buffer[i].y_mems1 : pz_min;
-		mems_max = buffer[i].y_mems1 > pz_max ? buffer[i].y_mems1 : pz_max;
+		mems_min = buffer[i].xyz_mems1[2] < mems_min ? buffer[i].xyz_mems1[2] : mems_min;
+		mems_max = buffer[i].xyz_mems1[2] > mems_max ? buffer[i].xyz_mems1[2] : mems_max;
 	}
 	float pz_ampl = (pz_max - pz_min) / 4095.0f * 3.3f;
 	float pz_offs = (pz_min + pz_max) / 4095.0f * 1.65f;
 	float mems_ampl = mems_max - mems_min;
-	float mems_offs = mems_min - mems_max;
+	float mems_offs = (mems_min + mems_max) / 2.0f;
 	printf("(%lu) Peak-peak: Piezo: %.3f V\tMEMS: %.3f\tOffset: Piezo: %.3f V\tMEMS: %.3f\r\n", HAL_GetTick(), pz_ampl, mems_ampl, pz_offs, mems_offs);
 }
 
 void Debug_test_print_p(volatile p_data_point_t *buffer)
 {
-	printf("(%lu) idk what to print here at %.3f km/h\r\n", HAL_GetTick(), buffer[0].speed);
+	printf("(%lu) idk what to print here at %f %f\r\n", HAL_GetTick(), buffer[0].lat, buffer[0].lon);
 }

@@ -20,12 +20,12 @@
  * 0 Hz - 2000 Hz
  gain = 1
  desired ripple = 1 dB
- actual ripple = n/a
+ actual ripple = 0.0981 dB
 
  * 2500 Hz - 8000 Hz
  gain = 0
  desired attenuation = -80 dB
- actual attenuation = n/a
+ actual attenuation = -97.6857 dB
 
  */
 

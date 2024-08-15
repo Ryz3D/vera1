@@ -34,9 +34,7 @@ typedef struct
 	uint8_t complete;
 	uint32_t timestamp;
 	uint16_t temp_mems1;
-	int32_t x_mems1;
-	int32_t y_mems1;
-	int32_t z_mems1;
+	int32_t xyz_mems1[3];
 	int16_t a_piezo[PIEZO_COUNT_MAX];
 } a_data_point_t;
 

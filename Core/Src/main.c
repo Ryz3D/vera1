@@ -22,10 +22,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "fir_taps1.h"
 #include "config.h"
 #include "data_points.h"
 #include "fir.h"
-#include "fir_taps8_i.h"
 #include "debug_tests.h"
 #include "sd.h"
 #include "adxl.h"
@@ -55,7 +55,9 @@ SD_HandleTypeDef hsd1;
 DMA_HandleTypeDef hdma_sdmmc1_rx;
 DMA_HandleTypeDef hdma_sdmmc1_tx;
 
-SPI_HandleTypeDef hspi1;
+SPI_HandleTypeDef hspi4;
+DMA_HandleTypeDef hdma_spi4_rx;
+DMA_HandleTypeDef hdma_spi4_tx;
 
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
@@ -110,7 +112,6 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_SDMMC1_SD_Init(void);
-static void MX_SPI1_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_ADC1_Init(void);
@@ -118,6 +119,7 @@ static void MX_TIM3_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_DAC_Init(void);
 static void MX_USART1_UART_Init(void);
+static void MX_SPI4_Init(void);
 /* USER CODE BEGIN PFP */
 void switch_buffers(void **buffer_current, void *buffer_1, void *buffer_2, volatile uint8_t *flag_save_buffer_1, volatile uint8_t *flag_save_buffer_2, volatile uint8_t *flag_overflow);
 void a_buffer_write_inc(void);
@@ -158,7 +160,6 @@ int main(void)
 	MX_GPIO_Init();
 	MX_DMA_Init();
 	MX_SDMMC1_SD_Init();
-	MX_SPI1_Init();
 	MX_FATFS_Init();
 	MX_USART3_UART_Init();
 	MX_TIM2_Init();
@@ -167,6 +168,7 @@ int main(void)
 	MX_TIM4_Init();
 	MX_DAC_Init();
 	MX_USART1_UART_Init();
+	MX_SPI4_Init();
 	/* USER CODE BEGIN 2 */
 	HAL_Delay(1);
 
@@ -192,7 +194,14 @@ int main(void)
 	{
 		Error_Handler();
 	}
+	printf("(%lu) SD card initialized\r\n", HAL_GetTick());
+	// If button is held down, wait for release. Otherwise capture is stopped immediately
+	while (HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin) == GPIO_PIN_SET)
+		;
+	// Button debounce
+	HAL_Delay(250);
 
+	// Load default configuration
 	Config_Default();
 #if LOAD_CONFIG
 	char config_buffer[500];
@@ -222,7 +231,17 @@ int main(void)
 	Debug_test_print_config();
 #endif
 
-	// TODO: init timers, adc channels
+	if (Config_Init(&hadc1, &htim2, &htim3, &htim4) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	printf("(%lu) Configuration loaded\r\n", HAL_GetTick());
+
+	if (adxl_init(&hspi4) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	printf("(%lu) ADXL357 initialized\r\n", HAL_GetTick());
 
 	// Start GPS UART
 	// TODO: 115200 baud
@@ -233,19 +252,23 @@ int main(void)
 		printf("(%lu) ERROR: main: USART1 HAL_UART_Receive_DMA failed\r\n", HAL_GetTick());
 		Error_Handler();
 	}
+
 #if DEBUG_TEST_BOOT_WITHOUT_GPS
 	sd_year = 2024;
 	sd_month = 7;
 	sd_day = 18;
 #else
-	// TODO: wait for gps packet, write date
+	// TODO: wait for gps packet, write date, print datetime
 #endif
+
+	// Create directory, initialize files
 	if (SD_InitDir() != HAL_OK)
 	{
 		Error_Handler();
 	}
+	printf("(%lu) Writing dir \"%s\"\r\n", HAL_GetTick(), dir_path);
 
-	// Init FIR filter
+	// Init digital FIR filter
 	for (uint8_t i_ch = 0; i_ch < config.piezo_count; i_ch++)
 	{
 		FIR_Init(&hfir_pz[i_ch], fir_taps);
@@ -303,7 +326,7 @@ int main(void)
 	p_header.p_sampling_rate = config.p_sampling_rate;
 	p_header.boot_duration = boot_duration;
 	SD_NewPage(1);
-	// Offset so page change doesn't happen simultaneously with buffer save, otherwise some files contain one buffer more than the others
+	// Offset so page change doesn't happen simultaneously with buffer save
 	last_page_change = HAL_GetTick() - 181;
 
 	printf("(%lu) Page %li (\"%s\", \"%s\")\r\n", HAL_GetTick(), page_num, a_file_path, p_file_path);
@@ -453,7 +476,7 @@ int main(void)
 	}
 
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-	printf("(%lu) Capture stopped\r\n", HAL_GetTick());
+	printf("(%lu) Capture stopped (\"%s\")\r\n", HAL_GetTick(), dir_path);
 
 	if (SD_FlushLog() != HAL_OK)
 	{
@@ -513,7 +536,8 @@ void SystemClock_Config(void)
 
 	/** Initializes the CPU, AHB and APB buses clocks
 	 */
-	RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+	RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK
+		| RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
 	RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
 	RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
 	RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
@@ -684,42 +708,42 @@ static void MX_SDMMC1_SD_Init(void)
 }
 
 /**
- * @brief SPI1 Initialization Function
+ * @brief SPI4 Initialization Function
  * @param None
  * @retval None
  */
-static void MX_SPI1_Init(void)
+static void MX_SPI4_Init(void)
 {
 
-	/* USER CODE BEGIN SPI1_Init 0 */
+	/* USER CODE BEGIN SPI4_Init 0 */
 
-	/* USER CODE END SPI1_Init 0 */
+	/* USER CODE END SPI4_Init 0 */
 
-	/* USER CODE BEGIN SPI1_Init 1 */
+	/* USER CODE BEGIN SPI4_Init 1 */
 
-	/* USER CODE END SPI1_Init 1 */
-	/* SPI1 parameter configuration*/
-	hspi1.Instance = SPI1;
-	hspi1.Init.Mode = SPI_MODE_MASTER;
-	hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-	hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-	hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
-	hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-	hspi1.Init.NSS = SPI_NSS_SOFT;
-	hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
-	hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
-	hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
-	hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-	hspi1.Init.CRCPolynomial = 7;
-	hspi1.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
-	hspi1.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
-	if (HAL_SPI_Init(&hspi1) != HAL_OK)
+	/* USER CODE END SPI4_Init 1 */
+	/* SPI4 parameter configuration*/
+	hspi4.Instance = SPI4;
+	hspi4.Init.Mode = SPI_MODE_MASTER;
+	hspi4.Init.Direction = SPI_DIRECTION_2LINES;
+	hspi4.Init.DataSize = SPI_DATASIZE_8BIT;
+	hspi4.Init.CLKPolarity = SPI_POLARITY_LOW;
+	hspi4.Init.CLKPhase = SPI_PHASE_1EDGE;
+	hspi4.Init.NSS = SPI_NSS_SOFT;
+	hspi4.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32;
+	hspi4.Init.FirstBit = SPI_FIRSTBIT_MSB;
+	hspi4.Init.TIMode = SPI_TIMODE_DISABLE;
+	hspi4.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+	hspi4.Init.CRCPolynomial = 7;
+	hspi4.Init.CRCLength = SPI_CRC_LENGTH_DATASIZE;
+	hspi4.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
+	if (HAL_SPI_Init(&hspi4) != HAL_OK)
 	{
 		Error_Handler();
 	}
-	/* USER CODE BEGIN SPI1_Init 2 */
+	/* USER CODE BEGIN SPI4_Init 2 */
 
-	/* USER CODE END SPI1_Init 2 */
+	/* USER CODE END SPI4_Init 2 */
 
 }
 
@@ -951,12 +975,18 @@ static void MX_DMA_Init(void)
 	/* DMA2_Stream0_IRQn interrupt configuration */
 	HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
 	HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+	/* DMA2_Stream1_IRQn interrupt configuration */
+	HAL_NVIC_SetPriority(DMA2_Stream1_IRQn, 0, 0);
+	HAL_NVIC_EnableIRQ(DMA2_Stream1_IRQn);
 	/* DMA2_Stream2_IRQn interrupt configuration */
 	HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, 0, 0);
 	HAL_NVIC_EnableIRQ(DMA2_Stream2_IRQn);
 	/* DMA2_Stream3_IRQn interrupt configuration */
 	HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 0, 0);
 	HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
+	/* DMA2_Stream4_IRQn interrupt configuration */
+	HAL_NVIC_SetPriority(DMA2_Stream4_IRQn, 0, 0);
+	HAL_NVIC_EnableIRQ(DMA2_Stream4_IRQn);
 	/* DMA2_Stream6_IRQn interrupt configuration */
 	HAL_NVIC_SetPriority(DMA2_Stream6_IRQn, 0, 0);
 	HAL_NVIC_EnableIRQ(DMA2_Stream6_IRQn);
@@ -976,14 +1006,17 @@ static void MX_GPIO_Init(void)
 	/* USER CODE END MX_GPIO_Init_1 */
 
 	/* GPIO Ports Clock Enable */
+	__HAL_RCC_GPIOE_CLK_ENABLE();
 	__HAL_RCC_GPIOC_CLK_ENABLE();
 	__HAL_RCC_GPIOH_CLK_ENABLE();
 	__HAL_RCC_GPIOA_CLK_ENABLE();
 	__HAL_RCC_GPIOB_CLK_ENABLE();
 	__HAL_RCC_GPIOF_CLK_ENABLE();
-	__HAL_RCC_GPIOE_CLK_ENABLE();
 	__HAL_RCC_GPIOD_CLK_ENABLE();
 	__HAL_RCC_GPIOG_CLK_ENABLE();
+
+	/*Configure GPIO pin Output Level */
+	HAL_GPIO_WritePin(GPIOE, GPIO_PIN_4 | Debug1_Pin, GPIO_PIN_RESET);
 
 	/*Configure GPIO pin Output Level */
 	HAL_GPIO_WritePin(GPIOB, LD1_Pin | LD3_Pin | LD2_Pin, GPIO_PIN_RESET);
@@ -992,13 +1025,14 @@ static void MX_GPIO_Init(void)
 	HAL_GPIO_WritePin(Debug2_GPIO_Port, Debug2_Pin, GPIO_PIN_RESET);
 
 	/*Configure GPIO pin Output Level */
-	HAL_GPIO_WritePin(Debug1_GPIO_Port, Debug1_Pin, GPIO_PIN_RESET);
-
-	/*Configure GPIO pin Output Level */
 	HAL_GPIO_WritePin(USB_PowerSwitchOn_GPIO_Port, USB_PowerSwitchOn_Pin, GPIO_PIN_RESET);
 
-	/*Configure GPIO pin Output Level */
-	HAL_GPIO_WritePin(SPI1_CS_GPIO_Port, SPI1_CS_Pin, GPIO_PIN_RESET);
+	/*Configure GPIO pin : PE4 */
+	GPIO_InitStruct.Pin = GPIO_PIN_4;
+	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+	GPIO_InitStruct.Pull = GPIO_NOPULL;
+	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+	HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
 	/*Configure GPIO pin : USER_Btn_Pin */
 	GPIO_InitStruct.Pin = USER_Btn_Pin;
@@ -1084,13 +1118,6 @@ static void MX_GPIO_Init(void)
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
-	/*Configure GPIO pin : SPI1_CS_Pin */
-	GPIO_InitStruct.Pin = SPI1_CS_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-	HAL_GPIO_Init(SPI1_CS_GPIO_Port, &GPIO_InitStruct);
-
 	/*Configure GPIO pin : RMII_TXD0_Pin */
 	GPIO_InitStruct.Pin = RMII_TXD0_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
@@ -1174,16 +1201,20 @@ void a_buffer_write_inc()
 	// Set complete bits of last data point
 	a_buffer_current[a_write_index].complete |= (1 << A_COMPLETE_TIMESTAMP) | (flag_complete_a_mems << A_COMPLETE_MEMS) | (flag_complete_a_pz << A_COMPLETE_PZ);
 
-	// If next index would overflow
-	if (++a_write_index >= config.a_buffer_len)
+	// TODO: can you get first sample valid?
+	if (ticks_counter > 4)
 	{
-		// Switch buffers
-		a_write_index = 0;
-		switch_buffers((void**)&a_buffer_current, (void*)a_buffer_1, (void*)a_buffer_2, &flag_save_a_buffer_1, &flag_save_a_buffer_2, &flag_overflow_a_buffer);
+		// If next index would overflow
+		if (++a_write_index >= config.a_buffer_len)
+		{
+			// Switch buffers
+			a_write_index = 0;
+			switch_buffers((void**)&a_buffer_current, (void*)a_buffer_1, (void*)a_buffer_2, &flag_save_a_buffer_1, &flag_save_a_buffer_2, &flag_overflow_a_buffer);
+		}
 	}
 
 	a_buffer_current[a_write_index].timestamp = ticks_counter;
-	a_buffer_current[a_write_index].x_mems1 = a_write_index;
+	a_buffer_current[a_write_index].xyz_mems1[0] = a_write_index;
 }
 
 void p_buffer_write_inc()
@@ -1209,13 +1240,20 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 	{
 		DEBUG_A_TIMER
 
-		if (capture_running && ticks_counter > 0)
+		if (capture_running)
 		{
 			// Increment data point index
 			a_buffer_write_inc();
-			// TODO: ADXL sync
+			// TODO: ADXL sync pulse
 		}
 		ticks_counter++;
+
+		if (adxl_request_data(&hspi4) != HAL_OK)
+		{
+			printf("WARNING: ADXL data request failed\r\n");
+			Error_Handler();
+		}
+		HAL_GPIO_WritePin(Debug1_GPIO_Port, Debug1_Pin, 1);
 
 		DEBUG_A_TIMER
 	}
@@ -1252,6 +1290,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 				a_buffer_current[a_write_index].a_piezo[i_ch] = hfir_pz[i_ch].Out[0];
 			}
 			// Override for unfiltered channels:
+			// TODO: remove
 			a_buffer_current[a_write_index].a_piezo[2] = (pz_dma_buffer[0] << 1) - 4094;
 			a_buffer_current[a_write_index].a_piezo[3] = (pz_dma_buffer[1] << 1) - 4094;
 			flag_complete_a_pz = 1;
@@ -1265,15 +1304,22 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 	}
 }
 
-void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
-	HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
+	adxl_data_t adxl_data = adxl_rx_callback();
+	a_buffer_current[a_write_index].xyz_mems1[0] = adxl_data.x;
+	a_buffer_current[a_write_index].xyz_mems1[1] = adxl_data.y;
+	a_buffer_current[a_write_index].xyz_mems1[2] = adxl_data.z;
+	a_buffer_current[a_write_index].temp_mems1 = adxl_data.temp;
+	flag_complete_a_mems = 1;
+	HAL_GPIO_WritePin(Debug1_GPIO_Port, Debug1_Pin, 0);
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
 	if (huart->Instance == USART1)
 	{
+		// TODO: refactor to gps handle (feed character in interrupt)
 		if (gps_buffer == '\n')
 		{
 			if (gps_write_index != 0)
@@ -1306,12 +1352,14 @@ void Error_Handler(void)
 	/* USER CODE BEGIN Error_Handler_Debug */
 	/* User can add his own implementation to report the HAL error return state */
 	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_SET);
-	printf("(%lu) Fatal Error\r\n", HAL_GetTick());
+	printf("(%lu) Fatal Error, but attempting to continue\r\n", HAL_GetTick());
 	SD_FlushLog();
-	SD_Uninit();
-	__disable_irq();
-	while (1)
-		;
+	/*
+	 SD_Uninit();
+	 __disable_irq();
+	 while (1)
+	 ;
+	 */
 	/* USER CODE END Error_Handler_Debug */
 }
 

@@ -110,12 +110,8 @@ void Error_Handler(void);
 #define MEMS_INT2_GPIO_Port GPIOD
 #define MEMS_INT1_Pin GPIO_PIN_5
 #define MEMS_INT1_GPIO_Port GPIOD
-#define SPI1_CS_Pin GPIO_PIN_6
-#define SPI1_CS_GPIO_Port GPIOD
 #define RMII_TXD0_Pin GPIO_PIN_13
 #define RMII_TXD0_GPIO_Port GPIOG
-#define SW0_Pin GPIO_PIN_3
-#define SW0_GPIO_Port GPIOB
 #define LD2_Pin GPIO_PIN_7
 #define LD2_GPIO_Port GPIOB
 

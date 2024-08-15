@@ -120,8 +120,6 @@ HAL_StatusTypeDef SD_InitDir(void)
 		return HAL_ERROR;
 	}
 
-	printf("(%lu) Writing dir '%s'\r\n", HAL_GetTick(), dir_path);
-
 	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
 	HAL_Delay(2000);
 	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);

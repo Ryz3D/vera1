@@ -65,7 +65,7 @@ extern config_t default_config, config;
 // Saving p_buffer_2 to a file
 #define DEBUG_P_BUFFER_2_SD ;
 // Piezo timer interrupt (@ 4 kHz)
-#define DEBUG_A_TIMER DEBUG1
+#define DEBUG_A_TIMER ;
 // Piezo ADC result (@ 4 kHz)
 #define DEBUG_ADC_PZ_CONV DEBUG2
 // GPS timer interrupt (@ 40 Hz)
@@ -77,12 +77,13 @@ extern config_t default_config, config;
 #define DEBUG_TEST_BOOT_WITHOUT_GPS 1
 #define DEBUG_TEST_FIR_FREQUENCY_SWEEP 0
 #define DEBUG_TEST_FIR_DAC 1
-#define DEBUG_TEST_PRINT_A 0
+#define DEBUG_TEST_PRINT_A 1
 #define DEBUG_TEST_PRINT_P 0
-#define DEBUG_TEST_PRINT_NEW_PAGE 0
+#define DEBUG_TEST_PRINT_NEW_PAGE 1
 
-void Config_Default();
+void Config_Default(void);
 void Config_Load(char *buffer, uint32_t size);
 void Config_Save(char *buffer, uint32_t size);
+HAL_StatusTypeDef Config_Init(ADC_HandleTypeDef *hadc1, TIM_HandleTypeDef *htim2, TIM_HandleTypeDef *htim3, TIM_HandleTypeDef *htim4);
 
 #endif /* INC_CONFIG_H_ */
