@@ -22,7 +22,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "fir_taps1.h"
+#include "fir_taps7.h"
 #include "config.h"
 #include "data_points.h"
 #include "fir.h"
@@ -1296,7 +1296,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 			flag_complete_a_pz = 1;
 
 #if DEBUG_TEST_FIR_DAC
-			HAL_DAC_SetValue(&hdac, DAC_CHANNEL_2, DAC_ALIGN_12B_R, (hfir_pz[0].Out[0] >> 1) + 2047);
+			HAL_DAC_SetValue(&hdac, DAC_CHANNEL_2, DAC_ALIGN_12B_R, ((uint16_t)hfir_pz[1].Out[0] >> 1) + 2047);
 #endif
 
 			DEBUG_ADC_PZ_CONV
