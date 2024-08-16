@@ -1,5 +1,7 @@
 /*
- * adxl357.h
+ * adxl.h
+ *
+ * SPI driver for MEMS sensor ADXL357 at 4 kSa/s
  *
  *  Created on: Jul 30, 2024
  *      Author: mirco
@@ -50,16 +52,39 @@
 #define ADXL_REG_SELF_TEST 0x2E
 #define ADXL_REG_RESET 0x2F
 
+#define ADXL_CHIP_SELECT(hadxl) HAL_GPIO_WritePin(hadxl->CS_GPIO_Port, hadxl->CS_Pin, GPIO_PIN_RESET);
+#define ADXL_CHIP_DESELECT(hadxl) HAL_GPIO_WritePin(hadxl->CS_GPIO_Port, hadxl->CS_Pin, GPIO_PIN_SET);
+
+typedef enum
+{
+	ADXL_STATE_READY,
+	ADXL_STATE_BUSY_TX,
+	ADXL_STATE_BUSY_RX,
+	ADXL_STATE_ERROR
+} ADXL_State_t;
+
+typedef struct
+{
+	ADXL_State_t state;
+	SPI_HandleTypeDef *hspi;
+	GPIO_TypeDef *CS_GPIO_Port;
+	uint16_t CS_Pin;
+	uint32_t timeout;
+	uint8_t identification[3];
+	uint8_t request_buffer[12];
+	uint8_t data_buffer[12];
+} ADXL_t;
+
 typedef struct
 {
 	uint16_t temp;
 	int32_t x, y, z;
-} adxl_data_t;
+} ADXL_Data_t;
 
-HAL_StatusTypeDef adxl_read_reg_multi(SPI_HandleTypeDef *hspi, uint8_t count, uint8_t register_addr, uint8_t *buffer);
-HAL_StatusTypeDef adxl_write_reg_multi(SPI_HandleTypeDef *hspi, uint8_t count, uint8_t register_addr, uint8_t *buffer);
-HAL_StatusTypeDef adxl_read_reg(SPI_HandleTypeDef *hspi, uint8_t register_addr, uint8_t *buffer);
-HAL_StatusTypeDef adxl_write_reg(SPI_HandleTypeDef *hspi, uint8_t register_addr, uint8_t data);
-HAL_StatusTypeDef adxl_init(SPI_HandleTypeDef *hspi);
-HAL_StatusTypeDef adxl_request_data(SPI_HandleTypeDef *hspi);
-adxl_data_t adxl_rx_callback();
+HAL_StatusTypeDef ADXL_ReadRegisters(ADXL_t *hadxl, uint8_t count, uint8_t register_addr, uint8_t *buffer);
+HAL_StatusTypeDef ADXL_WriteRegisters(ADXL_t *hadxl, uint8_t count, uint8_t register_addr, uint8_t *buffer);
+HAL_StatusTypeDef ADXL_ReadRegisterSingle(ADXL_t *hadxl, uint8_t register_addr, uint8_t *buffer);
+HAL_StatusTypeDef ADXL_WriteRegisterSingle(ADXL_t *hadxl, uint8_t register_addr, uint8_t data);
+HAL_StatusTypeDef ADXL_Init(ADXL_t *hadxl);
+HAL_StatusTypeDef ADXL_RequestData(ADXL_t *hadxl);
+ADXL_Data_t ADXL_RxCallback(ADXL_t *hadxl);

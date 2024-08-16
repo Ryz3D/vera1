@@ -1,5 +1,7 @@
 /*
- * sdhc.c
+ * sd.c
+ *
+ * Helper file for SD card access
  *
  *  Created on: Jun 26, 2024
  *      Author: mirco

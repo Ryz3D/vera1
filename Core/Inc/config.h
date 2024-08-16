@@ -77,9 +77,9 @@ extern config_t default_config, config;
 #define DEBUG_TEST_BOOT_WITHOUT_GPS 1
 #define DEBUG_TEST_FIR_FREQUENCY_SWEEP 0
 #define DEBUG_TEST_FIR_DAC 1
-#define DEBUG_TEST_PRINT_A 1
-#define DEBUG_TEST_PRINT_P 0
-#define DEBUG_TEST_PRINT_NEW_PAGE 1
+#define DEBUG_TEST_PRINT_A 0
+#define DEBUG_TEST_PRINT_P 1
+#define DEBUG_TEST_PRINT_NEW_PAGE 0
 
 void Config_Default(void);
 void Config_Load(char *buffer, uint32_t size);

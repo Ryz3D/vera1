@@ -1,166 +1,161 @@
 /*
  * adxl.c
  *
+ * SPI driver for MEMS sensor ADXL357 at 4 kSa/s
+ *
  *  Created on: Aug 02, 2024
  *      Author: mirco
  */
 
 #include "adxl.h"
 
-uint8_t adxl_request_buffer[12];
-uint8_t adxl_data_buffer[12];
-
-HAL_StatusTypeDef adxl_read_reg_multi(SPI_HandleTypeDef *hspi, uint8_t count, uint8_t register_addr, uint8_t *buffer)
+HAL_StatusTypeDef ADXL_ReadRegisters(ADXL_t *hadxl, uint8_t count, uint8_t register_addr, uint8_t *buffer)
 {
-	// TODO: Set hadxl state to busy
+	ADXL_CHIP_SELECT(hadxl);
 
-	HAL_GPIO_WritePin(GPIOE, GPIO_PIN_4, 0);
-
+	hadxl->state = ADXL_STATE_BUSY_TX;
 	uint8_t addr_tx = (register_addr << 1) | 1;
-	// TODO: hadxl timeout
-	if (HAL_SPI_Transmit(hspi, &addr_tx, sizeof(uint8_t), 1000) != HAL_OK)
+	if (HAL_SPI_Transmit(hadxl->hspi, &addr_tx, sizeof(uint8_t), hadxl->timeout) != HAL_OK)
 	{
-		// TODO: Set hadxl state
-		return HAL_ERROR;
-	}
-	if (HAL_SPI_Receive(hspi, buffer, count * sizeof(uint8_t), 1000) != HAL_OK)
-	{
+		hadxl->state = ADXL_STATE_ERROR;
 		return HAL_ERROR;
 	}
 
-	HAL_GPIO_WritePin(GPIOE, GPIO_PIN_4, 1);
+	hadxl->state = ADXL_STATE_BUSY_RX;
+	if (HAL_SPI_Receive(hadxl->hspi, buffer, count * sizeof(uint8_t), hadxl->timeout) != HAL_OK)
+	{
+		hadxl->state = ADXL_STATE_ERROR;
+		return HAL_ERROR;
+	}
+
+	hadxl->state = ADXL_STATE_READY;
+	ADXL_CHIP_DESELECT(hadxl);
 
 	return HAL_OK;
 }
 
-HAL_StatusTypeDef adxl_write_reg_multi(SPI_HandleTypeDef *hspi, uint8_t count, uint8_t register_addr, uint8_t *buffer)
+HAL_StatusTypeDef ADXL_WriteRegisters(ADXL_t *hadxl, uint8_t count, uint8_t register_addr, uint8_t *buffer)
 {
-	// TODO: Set hadxl state to busy
+	ADXL_CHIP_SELECT(hadxl);
 
-	HAL_GPIO_WritePin(GPIOE, GPIO_PIN_4, 0);
-
+	hadxl->state = ADXL_STATE_BUSY_TX;
 	uint8_t addr_tx = (register_addr << 1) | 0;
-	// TODO: hadxl timeout
-	if (HAL_SPI_Transmit(hspi, &addr_tx, sizeof(uint8_t), 1000) != HAL_OK)
+	if (HAL_SPI_Transmit(hadxl->hspi, &addr_tx, sizeof(uint8_t), hadxl->timeout) != HAL_OK)
 	{
-		// TODO: Set hadxl state
-		return HAL_ERROR;
-	}
-	if (HAL_SPI_Transmit(hspi, buffer, count, 1000) != HAL_OK)
-	{
-		// TODO: Set hadxl state
+		hadxl->state = ADXL_STATE_ERROR;
 		return HAL_ERROR;
 	}
 
-	HAL_GPIO_WritePin(GPIOE, GPIO_PIN_4, 1);
+	hadxl->state = ADXL_STATE_BUSY_RX;
+	if (HAL_SPI_Transmit(hadxl->hspi, buffer, count, hadxl->timeout) != HAL_OK)
+	{
+		hadxl->state = ADXL_STATE_ERROR;
+		return HAL_ERROR;
+	}
+
+	hadxl->state = ADXL_STATE_READY;
+	ADXL_CHIP_DESELECT(hadxl);
 
 	return HAL_OK;
 }
 
-HAL_StatusTypeDef adxl_read_reg(SPI_HandleTypeDef *hspi, uint8_t register_addr, uint8_t *buffer)
+HAL_StatusTypeDef ADXL_ReadRegisterSingle(ADXL_t *hadxl, uint8_t register_addr, uint8_t *buffer)
 {
-	return adxl_read_reg_multi(hspi, 1, register_addr, buffer);
+	return ADXL_ReadRegisters(hadxl, 1, register_addr, buffer);
 }
 
-HAL_StatusTypeDef adxl_write_reg(SPI_HandleTypeDef *hspi, uint8_t register_addr, uint8_t buffer)
+HAL_StatusTypeDef ADXL_WriteRegisterSingle(ADXL_t *hadxl, uint8_t register_addr, uint8_t buffer)
 {
-	return adxl_write_reg_multi(hspi, 1, register_addr, &buffer);
+	return ADXL_WriteRegisters(hadxl, 1, register_addr, &buffer);
 }
 
-HAL_StatusTypeDef adxl_init(SPI_HandleTypeDef *hspi)
+HAL_StatusTypeDef ADXL_Init(ADXL_t *hadxl)
 {
-	// TODO: refactor to ADXL struct handle
+	// Provide default values
+	if (hadxl->timeout == 0)
+	{
+		hadxl->timeout = 100;
+	}
 
 	// Flush SPI
-	HAL_GPIO_WritePin(GPIOE, GPIO_PIN_4, 0);
 	uint8_t ignore;
 	for (uint8_t i = 0; i < 10; i++)
 	{
-		adxl_read_reg(hspi, 0x00, &ignore);
+		ADXL_ReadRegisterSingle(hadxl, 0x00, &ignore);
 	}
-	HAL_GPIO_WritePin(GPIOE, GPIO_PIN_4, 1);
 
 	// Read identification registers
-	uint8_t buffer_adxl_id[3];
-	if (adxl_read_reg_multi(hspi, sizeof(buffer_adxl_id), ADXL_REG_DEVID_AD, buffer_adxl_id) != HAL_OK)
+	if (ADXL_ReadRegisters(hadxl, 3, ADXL_REG_DEVID_AD, hadxl->identification) != HAL_OK)
 	{
-		printf("(%lu) ERROR: adxl_init: Register read failed", HAL_GetTick());
+		printf("(%lu) ERROR: ADXL_Init: Identification register read failed", HAL_GetTick());
 		return HAL_ERROR;
 	}
 
-	if (buffer_adxl_id[0] != 0xAD)
+	if (hadxl->identification[0] != 0xAD)
 	{
-		printf("(%lu) WARNING: adxl_init: Incorrect DEVID_AD (Expected: 0xAD, Received: %x)\r\n", HAL_GetTick(), buffer_adxl_id[0]);
+		printf("(%lu) WARNING: ADXL_Init: Incorrect DEVID_AD (Expected: 0xAD, Received: 0x%02X)\r\n", HAL_GetTick(), hadxl->identification[0]);
 	}
-	if (buffer_adxl_id[1] != 0x1D)
+	if (hadxl->identification[1] != 0x1D)
 	{
-		printf("(%lu) WARNING: adxl_init: Incorrect DEVID_MST (Expected: 0x1D, Received: %x)\r\n", HAL_GetTick(), buffer_adxl_id[1]);
+		printf("(%lu) WARNING: ADXL_Init: Incorrect DEVID_MST (Expected: 0x1D, Received: 0x%02X)\r\n", HAL_GetTick(), hadxl->identification[1]);
 	}
-	if (buffer_adxl_id[2] != 0xED)
+	if (hadxl->identification[2] != 0xED)
 	{
-		printf("(%lu) WARNING: adxl_init: Incorrect PARTID (Expected: 0xED, Received: %x)\r\n", HAL_GetTick(), buffer_adxl_id[2]);
+		printf("(%lu) WARNING: ADXL_Init: Incorrect PARTID (Expected: 0xED, Received: 0x%02X)\r\n", HAL_GetTick(), hadxl->identification[2]);
 	}
 
 	// Filter
 	uint8_t hpf = 0b000; // HPF off
-	uint8_t lpf = 0b0000; // ODR 4000 Hz LPF 1000 Hz
-	if (adxl_write_reg(hspi, ADXL_REG_FILTER, (hpf << 4) | lpf) != HAL_OK)
+	uint8_t lpf = 0b0000; // ODR 4000 Hz LPF 1000 Hz (maximum)
+	if (ADXL_WriteRegisterSingle(hadxl, ADXL_REG_FILTER, (hpf << 4) | lpf) != HAL_OK)
 	{
-		return HAL_ERROR;
-	}
-
-	// INT_MAP
-	// DATA_RDY on INT1
-	if (adxl_write_reg(hspi, ADXL_REG_INT_MAP, 0b00000001) != HAL_OK)
-	{
-		return HAL_ERROR;
-	}
-
-	// Sync
-	// TODO: EXT_SYNC
-	if (adxl_write_reg(hspi, ADXL_REG_SYNC, 0b00000001) != HAL_OK)
-	{
+		printf("(%lu) ERROR: ADXL_Init: Register write failed", HAL_GetTick());
 		return HAL_ERROR;
 	}
 
 	// POWER_CTL
 	// Measurement mode
-	if (adxl_write_reg(hspi, ADXL_REG_POWER_CTL, 0b00000000) != HAL_OK)
+	if (ADXL_WriteRegisterSingle(hadxl, ADXL_REG_POWER_CTL, 0b00000000) != HAL_OK)
 	{
+		printf("(%lu) ERROR: ADXL_Init: Register write failed", HAL_GetTick());
 		return HAL_ERROR;
 	}
 
 	// Prepare buffer for data request
-	for (uint8_t i = 0; i < sizeof(adxl_request_buffer); i++)
+	for (uint8_t i = 0; i < sizeof(hadxl->request_buffer); i++)
 	{
-		adxl_request_buffer[i] = 0;
+		hadxl->request_buffer[i] = 0;
 	}
-	adxl_request_buffer[0] = (ADXL_REG_TEMP2 << 1) | 1;
+	hadxl->request_buffer[0] = (ADXL_REG_TEMP2 << 1) | 1;
 
 	return HAL_OK;
 }
 
-HAL_StatusTypeDef adxl_request_data(SPI_HandleTypeDef *hspi)
+HAL_StatusTypeDef ADXL_RequestData(ADXL_t *hadxl)
 {
-	HAL_GPIO_WritePin(GPIOE, GPIO_PIN_4, 0);
-	// Send adxl_request_buffer
-	if (HAL_SPI_TransmitReceive_DMA(hspi, adxl_request_buffer, adxl_data_buffer, sizeof(adxl_data_buffer)) != HAL_OK)
+	ADXL_CHIP_SELECT(hadxl);
+
+	// Send request_buffer
+	hadxl->state = ADXL_STATE_BUSY_RX;
+	if (HAL_SPI_TransmitReceive_DMA(hadxl->hspi, hadxl->request_buffer, hadxl->data_buffer, sizeof(hadxl->request_buffer)) != HAL_OK)
 	{
-		// TODO: Set hadxl state
+		hadxl->state = ADXL_STATE_ERROR;
 		return HAL_ERROR;
 	}
+
 	return HAL_OK;
 }
 
-adxl_data_t adxl_rx_callback()
+ADXL_Data_t ADXL_RxCallback(ADXL_t *hadxl)
 {
-	HAL_GPIO_WritePin(GPIOE, GPIO_PIN_4, 1);
+	hadxl->state = ADXL_STATE_READY;
+	ADXL_CHIP_DESELECT(hadxl);
 
-	adxl_data_t data;
-	data.temp = ((uint16_t)(adxl_data_buffer[1] & 0b00001111) << 8) | (adxl_data_buffer[2]);
-	data.x = ((uint32_t)adxl_data_buffer[3] << 12) | ((uint32_t)adxl_data_buffer[4] << 4) | (adxl_data_buffer[5] >> 4);
-	data.y = ((uint32_t)adxl_data_buffer[6] << 12) | ((uint32_t)adxl_data_buffer[7] << 4) | (adxl_data_buffer[8] >> 4);
-	data.z = ((uint32_t)adxl_data_buffer[9] << 12) | ((uint32_t)adxl_data_buffer[10] << 4) | (adxl_data_buffer[11] >> 4);
+	ADXL_Data_t data;
+	data.temp = ((uint16_t)(hadxl->data_buffer[1] & 0b00001111) << 8) | (hadxl->data_buffer[2]);
+	data.x = ((uint32_t)hadxl->data_buffer[3] << 12) | ((uint32_t)hadxl->data_buffer[4] << 4) | (hadxl->data_buffer[5] >> 4);
+	data.y = ((uint32_t)hadxl->data_buffer[6] << 12) | ((uint32_t)hadxl->data_buffer[7] << 4) | (hadxl->data_buffer[8] >> 4);
+	data.z = ((uint32_t)hadxl->data_buffer[9] << 12) | ((uint32_t)hadxl->data_buffer[10] << 4) | (hadxl->data_buffer[11] >> 4);
 
 	// 20-bit sign -> 32-bit sign
 	if (data.x & 0x80000)

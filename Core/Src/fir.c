@@ -23,20 +23,20 @@ HAL_StatusTypeDef FIR_Init(FIR_t *filter, const int16_t taps[])
 #else
 	filter->Taps = taps;
 #endif
-	for (uint16_t i = 0; i < FIR_TAPS_LEN + FIR_BLOCK_LEN - 1; i++)
+	for (uint16_t i = 0; i < FIR_TAPS_LEN + config.oversampling_ratio - 1; i++)
 	{
 		filter->State[i] = 0;
 	}
-	for (uint16_t i = 0; i < FIR_BLOCK_LEN; i++)
+	for (uint16_t i = 0; i < config.oversampling_ratio; i++)
 	{
 		filter->In[i] = filter->Out[i] = 0;
 	}
-	arm_fir_init_q15(&filter->Instance, FIR_TAPS_LEN, (q15_t*)filter->Taps, filter->State, FIR_BLOCK_LEN);
+	arm_fir_init_q15(&filter->Instance, FIR_TAPS_LEN, (q15_t*)filter->Taps, filter->State, config.oversampling_ratio);
 	return HAL_OK;
 }
 
 HAL_StatusTypeDef FIR_Update(FIR_t *filter)
 {
-	arm_fir_q15(&filter->Instance, filter->In, filter->Out, FIR_BLOCK_LEN);
+	arm_fir_q15(&filter->Instance, filter->In, filter->Out, config.oversampling_ratio);
 	return HAL_OK;
 }

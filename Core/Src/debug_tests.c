@@ -48,13 +48,13 @@ void Debug_test_FIR_frequency_sweep(FIR_t *hfir)
 		uint8_t delay_set = 0;
 		for (uint16_t iter = 0; iter < 400; iter++)
 		{
-			for (uint8_t i = 0; i < FIR_BLOCK_LEN; i++)
+			for (uint8_t i = 0; i < config.oversampling_ratio; i++)
 			{
 				hfir->In[i] = sin(2.0f * PI * freqs[f_i] / 16000.0f * (float)sim_t);
 				sim_t++;
 			}
 			FIR_Update(hfir);
-			for (uint8_t i = 0; i < FIR_BLOCK_LEN; i++)
+			for (uint8_t i = 0; i < config.oversampling_ratio; i++)
 			{
 				a_max = hfir->Out[i] > a_max ? hfir->Out[i] : a_max;
 				if (a_max > 0.1 && delay_set == 0)
@@ -65,7 +65,7 @@ void Debug_test_FIR_frequency_sweep(FIR_t *hfir)
 			}
 		}
 		amps[f_i] = a_max;
-		for (uint8_t i = 0; i < FIR_BLOCK_LEN; i++)
+		for (uint8_t i = 0; i < config.oversampling_ratio; i++)
 		{
 			hfir->In[i] = 0;
 		}

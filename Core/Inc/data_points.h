@@ -50,11 +50,11 @@ typedef struct
 {
 	uint8_t complete;
 	uint32_t timestamp;
-	uint32_t gps_time;
-	double height;
-	double speed;
-	double lat;
-	double lon;
+	float gps_time;
+	float lat;
+	float lon;
+	float speed;
+	float altitude;
 } p_data_point_t;
 
 #endif /* INC_DATA_POINTS_H_ */
