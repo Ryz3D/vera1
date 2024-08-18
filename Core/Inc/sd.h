@@ -18,17 +18,18 @@
 #include "data_points.h"
 
 #define CONFIG_FILE_PATH "config.txt"
-#define DIR_FORMAT "%04hu_%02hu_%02hu-%li"
+#define DIR_FORMAT "%04hu-%02hhu-%02hhu_%li"
 #define A_FILE_FORMAT DIR_FORMAT "/a_%li.bin"
 #define P_FILE_FORMAT DIR_FORMAT "/p_%li.bin"
 #define LOG_FILE_FORMAT DIR_FORMAT "/_log.txt"
 
 #define PATH_LEN 50
 
-#define SD_LOG_LEN 512
+#define SD_LOG_LEN 1024
 
 extern int32_t dir_num, page_num;
-extern uint16_t sd_year, sd_month, sd_day;
+extern uint16_t sd_year;
+extern uint8_t sd_month, sd_day;
 extern TCHAR dir_path[];
 extern TCHAR a_file_path[];
 extern TCHAR p_file_path[];
@@ -41,6 +42,7 @@ extern p_data_header_t p_header;
 
 HAL_StatusTypeDef SD_Init(uint8_t do_format);
 HAL_StatusTypeDef SD_InitDir(void);
+HAL_StatusTypeDef SD_UpdateFilepaths(void);
 HAL_StatusTypeDef SD_FlushLog(void);
 HAL_StatusTypeDef SD_NewPage(uint8_t init);
 HAL_StatusTypeDef SD_Uninit(void);

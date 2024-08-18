@@ -10,7 +10,8 @@
 #include "sd.h"
 
 int32_t dir_num = 0, page_num = 0;
-uint16_t sd_year, sd_month, sd_day;
+uint16_t sd_year;
+uint8_t sd_month, sd_day;
 TCHAR dir_path[PATH_LEN];
 TCHAR a_file_path[PATH_LEN];
 TCHAR p_file_path[PATH_LEN];
@@ -97,8 +98,9 @@ HAL_StatusTypeDef SD_InitDir(void)
 		}
 		if (file_info.fattrib & AM_DIR)
 		{
-			uint16_t test_y, test_m, test_d;
-			int32_t test_num;
+			uint16_t test_y = 0;
+			uint8_t test_m = 0, test_d = 0;
+			int32_t test_num = 0;
 			sscanf(file_info.fname, DIR_FORMAT, &test_y, &test_m, &test_d, &test_num);
 			if (test_y == sd_year && test_m == sd_month && test_d == sd_day)
 			{
@@ -120,19 +122,6 @@ HAL_StatusTypeDef SD_InitDir(void)
 	if (SD_UpdateFilepaths() != HAL_OK)
 	{
 		return HAL_ERROR;
-	}
-
-	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
-	HAL_Delay(2000);
-	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
-	HAL_Delay(250);
-
-	for (int32_t i = 0; i < dir_num; i++)
-	{
-		HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
-		HAL_Delay(50);
-		HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
-		HAL_Delay(50);
 	}
 
 	return HAL_OK;
@@ -252,7 +241,7 @@ HAL_StatusTypeDef SD_WriteBuffer(TCHAR *path, void *data, UINT size)
 	FRESULT res = f_write(&SDFile, data, size, &bytes_written);
 	if (res != FR_OK || bytes_written != size)
 	{
-		printf("(%lu) ERROR: SD_WriteBuffer: SD File \"%s\": file write failed (%hu / %lu bytes)\r\n", HAL_GetTick(), path, bytes_written, size);
+		printf("(%lu) ERROR: SD_WriteBuffer: SD File \"%s\": file write failed (%hu / %u bytes)\r\n", HAL_GetTick(), path, bytes_written, size);
 		f_close(&SDFile);
 		return HAL_ERROR;
 	}

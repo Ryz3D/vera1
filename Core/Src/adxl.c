@@ -85,10 +85,16 @@ HAL_StatusTypeDef ADXL_Init(ADXL_t *hadxl)
 	}
 
 	// Read identification registers
-	if (ADXL_ReadRegisters(hadxl, 3, ADXL_REG_DEVID_AD, hadxl->identification) != HAL_OK)
+	if (ADXL_ReadRegisters(hadxl, 3, ADXL_REG_DEVID_AD, (uint8_t*)hadxl->identification) != HAL_OK)
 	{
-		printf("(%lu) ERROR: ADXL_Init: Identification register read failed", HAL_GetTick());
+		printf("(%lu) ERROR: ADXL_Init: Identification register read failed\r\n", HAL_GetTick());
 		return HAL_ERROR;
+	}
+
+	if (hadxl->identification[0] == 0xFF && hadxl->identification[1] == 0xFF && hadxl->identification[2] == 0xFF)
+	{
+		printf("(%lu) WARNING: ADXL_Init: ADXL357 not connected\r\n", HAL_GetTick());
+		return HAL_TIMEOUT;
 	}
 
 	if (hadxl->identification[0] != 0xAD)
@@ -109,7 +115,7 @@ HAL_StatusTypeDef ADXL_Init(ADXL_t *hadxl)
 	uint8_t lpf = 0b0000; // ODR 4000 Hz LPF 1000 Hz (maximum)
 	if (ADXL_WriteRegisterSingle(hadxl, ADXL_REG_FILTER, (hpf << 4) | lpf) != HAL_OK)
 	{
-		printf("(%lu) ERROR: ADXL_Init: Register write failed", HAL_GetTick());
+		printf("(%lu) ERROR: ADXL_Init: Register write failed\r\n", HAL_GetTick());
 		return HAL_ERROR;
 	}
 
@@ -117,7 +123,7 @@ HAL_StatusTypeDef ADXL_Init(ADXL_t *hadxl)
 	// Measurement mode
 	if (ADXL_WriteRegisterSingle(hadxl, ADXL_REG_POWER_CTL, 0b00000000) != HAL_OK)
 	{
-		printf("(%lu) ERROR: ADXL_Init: Register write failed", HAL_GetTick());
+		printf("(%lu) ERROR: ADXL_Init: Register write failed\r\n", HAL_GetTick());
 		return HAL_ERROR;
 	}
 
@@ -128,6 +134,7 @@ HAL_StatusTypeDef ADXL_Init(ADXL_t *hadxl)
 	}
 	hadxl->request_buffer[0] = (ADXL_REG_TEMP2 << 1) | 1;
 
+	printf("(%lu) ADXL357 initialized\r\n", HAL_GetTick());
 	return HAL_OK;
 }
 
@@ -137,8 +144,9 @@ HAL_StatusTypeDef ADXL_RequestData(ADXL_t *hadxl)
 
 	// Send request_buffer
 	hadxl->state = ADXL_STATE_BUSY_RX;
-	if (HAL_SPI_TransmitReceive_DMA(hadxl->hspi, hadxl->request_buffer, hadxl->data_buffer, sizeof(hadxl->request_buffer)) != HAL_OK)
+	if (HAL_SPI_TransmitReceive_DMA(hadxl->hspi, hadxl->request_buffer, (uint8_t*)hadxl->data_buffer, sizeof(hadxl->request_buffer)) == HAL_ERROR)
 	{
+		printf("(%lu) ERROR: ADXL_RequestData: TxRx failed\r\n", HAL_GetTick());
 		hadxl->state = ADXL_STATE_ERROR;
 		return HAL_ERROR;
 	}
@@ -169,6 +177,15 @@ ADXL_Data_t ADXL_RxCallback(ADXL_t *hadxl)
 	if (data.z & 0x80000)
 	{
 		data.z -= 0x100000;
+	}
+
+	if (data.x == 0xFFFFFFFF && data.y == 0xFFFFFFFF && data.z == 0xFFFFFFFF)
+	{
+		data.data_valid = 0;
+	}
+	else
+	{
+		data.data_valid = 1;
 	}
 
 	return data;

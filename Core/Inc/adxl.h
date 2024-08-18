@@ -67,16 +67,17 @@ typedef struct
 {
 	ADXL_State_t state;
 	SPI_HandleTypeDef *hspi;
+	uint32_t timeout;
 	GPIO_TypeDef *CS_GPIO_Port;
 	uint16_t CS_Pin;
-	uint32_t timeout;
-	uint8_t identification[3];
+	volatile uint8_t identification[3];
 	uint8_t request_buffer[12];
-	uint8_t data_buffer[12];
+	volatile uint8_t data_buffer[12];
 } ADXL_t;
 
 typedef struct
 {
+	uint8_t data_valid;
 	uint16_t temp;
 	int32_t x, y, z;
 } ADXL_Data_t;

@@ -10,7 +10,7 @@
 config_t default_config =
 	{
 		.a_sampling_rate = 4000, // 4000 (Sa/s)
-		.p_sampling_rate = 10, // 10 (Sa/s)
+		.p_sampling_rate = 3, // 10 (Sa/s)
 		.oversampling_ratio = 4, // 4 (16 kSa/s)
 		.piezo_count = 5, // 3
 		.a_buffer_len = 4096, // 4096 (Sa)
@@ -40,7 +40,6 @@ config_t config;
 HAL_StatusTypeDef Config_Init_ADC1();
 HAL_StatusTypeDef Config_Init_TIM2();
 HAL_StatusTypeDef Config_Init_TIM3();
-HAL_StatusTypeDef Config_Init_TIM4();
 
 void Config_Default(void)
 {
@@ -67,8 +66,8 @@ void Config_Load(char *buffer, uint32_t size)
 	}
 
 	C_CHECK_VAR(C_F_A_SAMPLING_RATE, config.a_sampling_rate, 1, 100000);
-	C_CHECK_VAR(C_F_P_SAMPLING_RATE, config.p_sampling_rate, 1, 100);
-	C_CHECK_VAR(C_F_OVERSAMPLING_RATIO, config.oversampling_ratio, 1, 100000);
+	C_CHECK_VAR(C_F_P_SAMPLING_RATE, config.p_sampling_rate, 1, 30);
+	C_CHECK_VAR(C_F_OVERSAMPLING_RATIO, config.oversampling_ratio, 1, OVERSAMPLING_RATIO_MAX);
 	C_CHECK_VAR(C_F_PIEZO_COUNT, config.piezo_count, 1, PIEZO_COUNT_MAX);
 	C_CHECK_VAR(C_F_A_BUFFER_LEN, config.a_buffer_len, 1, A_BUFFER_LEN_MAX);
 	C_CHECK_VAR(C_F_P_BUFFER_LEN, config.p_buffer_len, 1, P_BUFFER_LEN_MAX);
@@ -87,7 +86,7 @@ void Config_Save(char *buffer, uint32_t size)
 	C_WRITE_VAR(C_F_PAGE_DURATION_MS, config.page_duration_ms);
 }
 
-HAL_StatusTypeDef Config_Init(ADC_HandleTypeDef *hadc1, TIM_HandleTypeDef *htim2, TIM_HandleTypeDef *htim3, TIM_HandleTypeDef *htim4)
+HAL_StatusTypeDef Config_Init(ADC_HandleTypeDef *hadc1, TIM_HandleTypeDef *htim2, TIM_HandleTypeDef *htim3)
 {
 	if (Config_Init_ADC1(hadc1) != HAL_OK)
 	{
@@ -102,11 +101,6 @@ HAL_StatusTypeDef Config_Init(ADC_HandleTypeDef *hadc1, TIM_HandleTypeDef *htim2
 	if (Config_Init_TIM3(htim3) != HAL_OK)
 	{
 		printf("(%lu) ERROR: Config_Init: TIM3 Init failed\r\n", HAL_GetTick());
-		return HAL_ERROR;
-	}
-	if (Config_Init_TIM4(htim4) != HAL_OK)
-	{
-		printf("(%lu) ERROR: Config_Init: TIM4 Init failed\r\n", HAL_GetTick());
 		return HAL_ERROR;
 	}
 	return HAL_OK;
@@ -190,19 +184,6 @@ HAL_StatusTypeDef Config_Init_TIM3(TIM_HandleTypeDef *htim3)
 	htim3->Init.Prescaler = 0;
 	htim3->Init.Period = config.oversampling_ratio - 1;
 	if (HAL_TIM_Base_Init(htim3) != HAL_OK)
-	{
-		return HAL_ERROR;
-	}
-	return HAL_OK;
-}
-
-HAL_StatusTypeDef Config_Init_TIM4(TIM_HandleTypeDef *htim4)
-{
-	// Clock source TIM2
-	// f = config.p_sampling_rate
-	htim4->Init.Prescaler = 0;
-	htim4->Init.Period = config.a_sampling_rate * config.oversampling_ratio / config.p_sampling_rate - 1;
-	if (HAL_TIM_Base_Init(htim4) != HAL_OK)
 	{
 		return HAL_ERROR;
 	}

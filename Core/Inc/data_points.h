@@ -15,7 +15,10 @@
 #define A_COMPLETE_PZ 2
 
 #define P_COMPLETE_TIMESTAMP 0
-#define P_COMPLETE_GPS 1
+#define P_COMPLETE_POSITION 1
+#define P_COMPLETE_SPEED 2
+#define P_COMPLETE_ALTITUDE 3
+#define P_COMPLETE_GNSS_TIME 4
 
 typedef struct
 {
@@ -44,13 +47,18 @@ typedef struct
 	uint32_t boot_duration;
 	uint32_t p_buffer_len;
 	uint32_t p_sampling_rate;
+	uint16_t year;
+	uint8_t month;
+	uint8_t day;
 } p_data_header_t;
 
 typedef struct
 {
 	uint8_t complete;
 	uint32_t timestamp;
-	float gps_time;
+	uint8_t gnss_hour;
+	uint8_t gnss_minute;
+	float gnss_second;
 	float lat;
 	float lon;
 	float speed;

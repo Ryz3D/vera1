@@ -1,6 +1,8 @@
 /*
  * fir.h
  *
+ * Wrapper for CMSIS-DSP FIR filter (16-bit int)
+ *
  *  Created on: Jul 29, 2024
  *      Author: mirco
  */

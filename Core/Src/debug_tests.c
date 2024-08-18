@@ -126,5 +126,4 @@ void Debug_test_print_a(volatile a_data_point_t *buffer)
 
 void Debug_test_print_p(volatile p_data_point_t *buffer)
 {
-	printf("(%lu) idk what to print here at %f %f\r\n", HAL_GetTick(), buffer[0].lat, buffer[0].lon);
 }

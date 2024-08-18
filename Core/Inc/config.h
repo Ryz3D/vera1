@@ -25,8 +25,8 @@
 
 #define C_F_A_SAMPLING_RATE "a_sampling_rate=%lu"
 #define C_F_P_SAMPLING_RATE "p_sampling_rate=%lu"
-#define C_F_OVERSAMPLING_RATIO "oversampling_ratio=%u"
-#define C_F_PIEZO_COUNT "piezo_count=%u"
+#define C_F_OVERSAMPLING_RATIO "oversampling_ratio=%hhu"
+#define C_F_PIEZO_COUNT "piezo_count=%hhu"
 #define C_F_A_BUFFER_LEN "a_buffer_len=%lu"
 #define C_F_P_BUFFER_LEN "p_buffer_len=%lu"
 #define C_F_PAGE_DURATION_MS "page_duration_ms=%lu"
@@ -68,13 +68,11 @@ extern config_t default_config, config;
 #define DEBUG_A_TIMER ;
 // Piezo ADC result (@ 4 kHz)
 #define DEBUG_ADC_PZ_CONV DEBUG2
-// GPS timer interrupt (@ 40 Hz)
-#define DEBUG_P_TIMER ;
 
 #define DEBUG_TEST_PRINT_CONFIG 1
 #define DEBUG_TEST_ALWAYS_FORMAT_SD 0
 #define DEBUG_TEST_NEVER_FORMAT_SD 0
-#define DEBUG_TEST_BOOT_WITHOUT_GPS 1
+#define DEBUG_TEST_BOOT_WITHOUT_DATE 0
 #define DEBUG_TEST_FIR_FREQUENCY_SWEEP 0
 #define DEBUG_TEST_FIR_DAC 1
 #define DEBUG_TEST_PRINT_A 0
@@ -84,6 +82,6 @@ extern config_t default_config, config;
 void Config_Default(void);
 void Config_Load(char *buffer, uint32_t size);
 void Config_Save(char *buffer, uint32_t size);
-HAL_StatusTypeDef Config_Init(ADC_HandleTypeDef *hadc1, TIM_HandleTypeDef *htim2, TIM_HandleTypeDef *htim3, TIM_HandleTypeDef *htim4);
+HAL_StatusTypeDef Config_Init(ADC_HandleTypeDef *hadc1, TIM_HandleTypeDef *htim2, TIM_HandleTypeDef *htim3);
 
 #endif /* INC_CONFIG_H_ */
