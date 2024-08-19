@@ -10,6 +10,7 @@
 #include "nmea.h"
 
 const char nmea_pformat_rmc[] = "fcfcfcffifcc";
+const char nmea_pformat_gga[] = "ffcfcciffcfcfi";
 const char nmea_pformat_gll[] = "fcfcfcc";
 const char nmea_pformat_vtg[] = "fcfcfcfcc";
 
@@ -83,8 +84,8 @@ HAL_StatusTypeDef NMEA_Init(NMEA_t *hnmea)
 		hnmea->sampling_rate = 10;
 	}
 	hnmea->rx_buffer_write_index = 0;
-	hnmea->line_ready = 0;
-	hnmea->overflowing = 0;
+	hnmea->circular_read_index = 0;
+	hnmea->circular_write_index = 0;
 
 	char pubx_buffer[100];
 
@@ -115,7 +116,7 @@ HAL_StatusTypeDef NMEA_Init(NMEA_t *hnmea)
 	NMEA_SendUBX(hnmea, NMEA_UBX_RATE_HEADER, &ubx_rate, sizeof(ubx_rate));
 
 	// TODO: Switch to Galileo for accuracy?
-	if (HAL_UART_Receive_DMA(hnmea->huart, (uint8_t*)&hnmea->dma_buffer, sizeof(char)) != HAL_OK)
+	if (HAL_UART_Receive_DMA(hnmea->huart, (uint8_t*)&hnmea->dma_buffer, NMEA_DMA_BUFFER_SIZE) != HAL_OK)
 	{
 		printf("(%lu) ERROR: NMEA_Init: HAL_UART_Receive_DMA failed\r\n", HAL_GetTick());
 		return HAL_ERROR;
@@ -138,15 +139,16 @@ NMEA_Data_t NMEA_GetDate(NMEA_t *hnmea)
 	uint32_t time_end = HAL_GetTick() + NMEA_DATE_WAIT_DURATION;
 	while (HAL_GetTick() <= time_end)
 	{
-		if (hnmea->line_ready)
+		if (hnmea->circular_write_index != hnmea->circular_read_index)
 		{
-			NMEA_Data_t new_data = NMEA_ProcessLine(hnmea);
-			if (new_data.date_valid)
+			NMEA_Data_t *new_data = &hnmea->circular_buffer[hnmea->circular_read_index];
+			hnmea->circular_read_index = (hnmea->circular_read_index + 1) % NMEA_CIRCULAR_BUFFER_SIZE;
+			if (new_data->date_valid)
 			{
 				data.date_valid = 1;
-				data.year = new_data.year;
-				data.month = new_data.month;
-				data.day = new_data.day;
+				data.year = new_data->year;
+				data.month = new_data->month;
+				data.day = new_data->day;
 				break;
 			}
 		}
@@ -157,35 +159,33 @@ NMEA_Data_t NMEA_GetDate(NMEA_t *hnmea)
 
 HAL_StatusTypeDef NMEA_ProcessChar(NMEA_t *hnmea)
 {
-	if (hnmea->dma_buffer == '\n')
+	for (uint32_t i = 0; i < NMEA_DMA_BUFFER_SIZE; i++)
 	{
-		if (hnmea->rx_buffer_write_index > 1)
+		if (hnmea->dma_buffer[i] == '\n')
 		{
-			if (hnmea->line_ready)
-			{
-				// TODO: circular buffering -> all messages come at once
-				// hnmea->overflowing = 1;
-			}
-			else
+			if (hnmea->rx_buffer_write_index > 1)
 			{
 				// Remove \r
 				memcpy((void*)hnmea->line_buffer, (void*)hnmea->rx_buffer, hnmea->rx_buffer_write_index - 1);
 				hnmea->line_buffer[hnmea->rx_buffer_write_index - 1] = '\0';
-				hnmea->line_ready = 1;
+				if (NMEA_ProcessLine(hnmea, &hnmea->circular_buffer[hnmea->circular_write_index]))
+				{
+					hnmea->circular_write_index = (hnmea->circular_write_index + 1) % NMEA_CIRCULAR_BUFFER_SIZE;
+				}
 			}
-		}
-		hnmea->rx_buffer_write_index = 0;
-	}
-	else
-	{
-		if (hnmea->dma_buffer == '$' || hnmea->rx_buffer_write_index == sizeof(hnmea->rx_buffer))
-		{
 			hnmea->rx_buffer_write_index = 0;
 		}
-		hnmea->rx_buffer[hnmea->rx_buffer_write_index++] = hnmea->dma_buffer;
+		else
+		{
+			if (hnmea->dma_buffer[i] == '$' || hnmea->rx_buffer_write_index == sizeof(hnmea->rx_buffer))
+			{
+				hnmea->rx_buffer_write_index = 0;
+			}
+			hnmea->rx_buffer[hnmea->rx_buffer_write_index++] = hnmea->dma_buffer[i];
+		}
 	}
 
-	if (HAL_UART_Receive_DMA(hnmea->huart, (uint8_t*)&hnmea->dma_buffer, sizeof(char)) != HAL_OK)
+	if (HAL_UART_Receive_DMA(hnmea->huart, (uint8_t*)&hnmea->dma_buffer, NMEA_DMA_BUFFER_SIZE) != HAL_OK)
 	{
 		printf("(%lu) ERROR: NMEA_ProcessChar: HAL_UART_Receive_DMA failed\r\n", HAL_GetTick());
 		return HAL_ERROR;
@@ -194,88 +194,103 @@ HAL_StatusTypeDef NMEA_ProcessChar(NMEA_t *hnmea)
 	return HAL_OK;
 }
 
-NMEA_Data_t NMEA_ProcessLine(NMEA_t *hnmea)
+uint8_t NMEA_ProcessLine(NMEA_t *hnmea, NMEA_Data_t *data)
 {
-	NMEA_Data_t data = {
-		.position_valid = 0,
-		.speed_valid = 0,
-		.altitude_valid = 0,
-		.date_valid = 0,
-		.time_valid = 0,
-	};
+	uint8_t any_valid = 0;
+
+	data->timestamp = HAL_GetTick();
+	data->position_valid = 0;
+	data->speed_valid = 0;
+	data->altitude_valid = 0;
+	data->date_valid = 0;
+	data->time_valid = 0;
 
 	if (strncmp("$G", (char*)hnmea->line_buffer, 2) == 0)
 	{
-		if (NMEA_ChecksumValid(hnmea))
+		data->talker = hnmea->line_buffer[2];
+		if (strncmp("RMC", (char*)hnmea->line_buffer + 3, 3) == 0)
 		{
-			data.talker = hnmea->line_buffer[2];
-			if (strncmp("RMC", (char*)hnmea->line_buffer + 3, 3) == 0)
+			if (!NMEA_ChecksumValid(hnmea))
 			{
-				NMEA_Packet_RMC_t packet;
-				NMEA_ParsePacket(hnmea, &packet, nmea_pformat_rmc);
-
-				if (packet.date > 0)
-				{
-					data.date_valid = 1;
-					NMEA_ConvertDate(&data, packet.date);
-				}
-				if (packet.time > 0)
-				{
-					data.time_valid = 1;
-					NMEA_ConvertTime(&data, packet.time);
-				}
-				if (packet.mode != 'N')
-				{
-					data.position_valid = 1;
-					NMEA_ConvertLatLon(&data, packet.lat, packet.lat_dir, packet.lon, packet.lon_dir);
-
-					data.speed_valid = 1;
-					data.speed_kmh = packet.speed_kn * 1.852f;
-				}
+				return 0;
 			}
-			// TODO: altitude packet GGA
-			/*
-			 // GLL
-			 if (strncmp("GLL", (char*)hnmea->line_buffer + 3, 3) == 0)
-			 {
-			 NMEA_Packet_GLL_t packet;
-			 NMEA_ParsePacket(hnmea, &packet, nmea_pformat_gll);
 
-			 if (packet.time > 0)
-			 {
-			 data.time_valid = 1;
-			 NMEA_ConvertTime(&data, packet.time);
-			 }
-			 if (packet.mode != 'N')
-			 {
-			 data.pos_valid = 1;
-			 NMEA_ConvertLatLon(&data, packet.lat, packet.lat_dir, packet.lon, packet.lon_dir);
-			 }
-			 }
-			 */
-			/*
-			 // VTG
-			 if (strncmp("VTG", (char*)hnmea->line_buffer + 3, 3) == 0)
-			 {
-			 NMEA_Packet_VTG_t packet;
-			 NMEA_ParsePacket(hnmea, &packet, nmea_pformat_vtg);
+			NMEA_Packet_RMC_t packet;
+			NMEA_ParsePacket(hnmea, &packet, nmea_pformat_rmc);
 
-			 if (packet.mode != 'N')
-			 {
-			 data.speed_valid = 1;
-			 data.speed_kmh = packet.speed_kmh;
-			 }
-			 }
-			 */
+			if (packet.date > 0)
+			{
+				any_valid = 1;
+				data->date_valid = 1;
+				NMEA_ConvertDate(data, packet.date);
+			}
+			if (packet.time > 0)
+			{
+				any_valid = 1;
+				data->time_valid = 1;
+				NMEA_ConvertTime(data, packet.time);
+			}
+			if (packet.mode != 'N')
+			{
+				any_valid = 1;
+				data->position_valid = 1;
+				NMEA_ConvertLatLon(data, packet.lat, packet.lat_dir, packet.lon, packet.lon_dir);
+
+				data->speed_valid = 1;
+				data->speed_kmh = packet.speed_kn * 1.852f;
+			}
 		}
-		else
+		if (strncmp("GGA", (char*)hnmea->line_buffer + 3, 3) == 0)
 		{
-			printf("WARNING: NMEA_ProcessLine: Invalid checksum in %s\r\n", hnmea->line_buffer);
-		}
-	}
-	hnmea->line_ready = 0;
+			if (!NMEA_ChecksumValid(hnmea))
+			{
+				return 0;
+			}
 
-	return data;
+			NMEA_Packet_GGA_t packet;
+			NMEA_ParsePacket(hnmea, &packet, nmea_pformat_gga);
+
+			if (packet.altitude > 0)
+			{
+				any_valid = 1;
+				data->altitude_valid = 1;
+				data->altitude = packet.altitude;
+			}
+		}
+		/*
+		 if (strncmp("GLL", (char*)hnmea->line_buffer + 3, 3) == 0)
+		 {
+		 NMEA_Packet_GLL_t packet;
+		 NMEA_ParsePacket(hnmea, &packet, nmea_pformat_gll);
+
+		 if (packet.time > 0)
+		 {
+		 data->time_valid = 1;
+		 NMEA_ConvertTime(data, packet.time);
+		 }
+		 if (packet.mode != NMEA_MODE_NOT_VALID)
+		 {
+		 data->pos_valid = 1;
+		 NMEA_ConvertLatLon(data, packet.lat, packet.lat_dir, packet.lon, packet.lon_dir);
+		 }
+		 }
+		 */
+		/*
+		 if (strncmp("VTG", (char*)hnmea->line_buffer + 3, 3) == 0)
+		 {
+		 NMEA_Packet_VTG_t packet;
+		 NMEA_ParsePacket(hnmea, &packet, nmea_pformat_vtg);
+
+		 if (packet.mode != NMEA_MODE_NOT_VALID)
+		 {
+		 data->speed_valid = 1;
+		 data->speed_kmh = packet.speed_kmh;
+		 }
+		 }
+		 */
+	}
+
+	return any_valid;
 }
 
 uint8_t NMEA_ChecksumValid(NMEA_t *hnmea)

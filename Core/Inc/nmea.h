@@ -31,6 +31,34 @@
 #define NMEA_MODE_NOT_VALID 'N'
 
 #define NMEA_DATE_WAIT_DURATION 120000
+#define NMEA_RX_BUFFER_SIZE 512
+#define NMEA_DMA_BUFFER_SIZE 32
+#define NMEA_CIRCULAR_BUFFER_SIZE 128
+
+typedef struct
+{
+	uint32_t timestamp;
+	char talker; // See #define NMEA_TALKER_XXX
+	// Position
+	uint8_t position_valid;
+	float lat, lon;
+	// Speed
+	uint8_t speed_valid;
+	float speed_kmh;
+	// Altitude
+	uint8_t altitude_valid;
+	float altitude;
+	// Date
+	uint8_t date_valid;
+	uint8_t year;
+	uint8_t month;
+	uint8_t day;
+	// Time
+	uint8_t time_valid;
+	uint8_t hour;
+	uint8_t minute;
+	float second;
+} NMEA_Data_t;
 
 typedef struct
 {
@@ -38,37 +66,14 @@ typedef struct
 	uint32_t timeout;
 	uint32_t baud;
 	uint8_t sampling_rate;
-	volatile char dma_buffer;
-	volatile char rx_buffer[1000];
+	volatile char dma_buffer[NMEA_DMA_BUFFER_SIZE];
+	volatile char rx_buffer[NMEA_RX_BUFFER_SIZE];
 	volatile uint16_t rx_buffer_write_index;
-	volatile char line_buffer[1000];
-	volatile uint8_t line_ready;
-	volatile uint8_t overflowing;
+	volatile char line_buffer[NMEA_RX_BUFFER_SIZE];
+	volatile uint32_t circular_read_index;
+	volatile uint32_t circular_write_index;
+	NMEA_Data_t circular_buffer[NMEA_CIRCULAR_BUFFER_SIZE];
 } NMEA_t;
-
-typedef struct
-{
-	char talker;
-	// position
-	uint8_t position_valid;
-	float lat, lon;
-	// speed
-	uint8_t speed_valid;
-	float speed_kmh;
-	// altitude
-	uint8_t altitude_valid;
-	float altitude;
-	// date
-	uint8_t date_valid;
-	uint8_t year;
-	uint8_t month;
-	uint8_t day;
-	// time
-	uint8_t time_valid;
-	uint8_t hour;
-	uint8_t minute;
-	float second;
-} NMEA_Data_t;
 
 extern const char nmea_pformat_rmc[];
 
@@ -85,8 +90,28 @@ typedef struct
 	int32_t date;
 	float magvar;
 	char magvar_dir;
-	char mode;
+	char mode; // See #define NMEA_MODE_XXX
 } NMEA_Packet_RMC_t;
+
+extern const char nmea_pformat_gga[];
+
+typedef struct
+{
+	float time;
+	float lat;
+	char lat_dir;
+	float lon;
+	char lon_dir;
+	char quality;
+	int32_t num_SV;
+	float HDOP;
+	float altitude;
+	char M1;
+	float sep;
+	char M2;
+	float diff_age;
+	int32_t diff_station;
+} NMEA_Packet_GGA_t;
 
 extern const char nmea_pformat_gll[];
 
@@ -98,7 +123,7 @@ typedef struct
 	char lon_dir;
 	float time;
 	char status;
-	char mode;
+	char mode; // See #define NMEA_MODE_XXX
 } NMEA_Packet_GLL_t;
 
 extern const char nmea_pformat_vtg[];
@@ -113,7 +138,7 @@ typedef struct
 	char N;
 	float speed_kmh;
 	char K;
-	char mode;
+	char mode; // See #define NMEA_MODE_XXX
 } NMEA_Packet_VTG_t;
 
 // header = Class, ID, Length
@@ -143,6 +168,6 @@ HAL_StatusTypeDef NMEA_SendUBX(NMEA_t *hnmea, uint32_t header, void *packet, siz
 HAL_StatusTypeDef NMEA_Init(NMEA_t *hnmea);
 NMEA_Data_t NMEA_GetDate(NMEA_t *hnmea);
 HAL_StatusTypeDef NMEA_ProcessChar(NMEA_t *hnmea);
-NMEA_Data_t NMEA_ProcessLine(NMEA_t *hnmea);
+uint8_t NMEA_ProcessLine(NMEA_t *hnmea, NMEA_Data_t *data);
 
 #endif /* INC_NMEA_H_ */

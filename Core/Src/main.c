@@ -77,6 +77,7 @@ Double_Buffer_t hbuffer_a, hbuffer_p; // Manages double buffering flags for acce
 uint32_t last_page_change = 0; // Time of last call to SD_NewPage
 volatile uint8_t capture_running = 0; // 0: Not running, 1: running
 volatile uint32_t ticks_counter = 0; // Increments with each acceleration data point
+uint32_t time_p_inc = 0; // When a valid NMEA packet is received, this is set to end time of current data point (NMEA_PACKET_MERGE_DURATION)
 
 volatile uint16_t pz_dma_buffer[PIEZO_COUNT_MAX * OVERSAMPLING_RATIO_MAX];
 
@@ -421,6 +422,7 @@ int main(void)
 		if (hbuffer_a.flag_overflow)
 		{
 			printf("(%lu) WARNING: main: a_buffer overflow\r\n", HAL_GetTick());
+			hbuffer_a.flag_overflow = 0;
 		}
 
 		// If p_buffer_1 is ready to save
@@ -451,65 +453,81 @@ int main(void)
 		if (hbuffer_p.flag_overflow)
 		{
 			printf("(%lu) WARNING: main: p_buffer overflow\r\n", HAL_GetTick());
+			hbuffer_p.flag_overflow = 0;
 		}
 
-		// Process GNSS data
-		if (hnmea.overflowing)
+		// Process NMEA data
+		while (hnmea.circular_write_index != hnmea.circular_read_index)
 		{
-			printf("(%lu) WARNING: main: GNSS buffer overflowing\r\n", HAL_GetTick());
-			hnmea.overflowing = 0;
-		}
-		if (hnmea.line_ready)
-		{
-			NMEA_Data_t gnss_data = NMEA_ProcessLine(&hnmea);
+			NMEA_Data_t *data = &hnmea.circular_buffer[hnmea.circular_read_index];
+			hnmea.circular_read_index = (hnmea.circular_read_index + 1) % NMEA_CIRCULAR_BUFFER_SIZE;
+
 			uint8_t any_valid = 0;
-			if (gnss_data.position_valid)
+			if (data->position_valid)
 			{
 				any_valid = 1;
 				flag_complete_p_position = 1;
-				p_current_data_point->lat = gnss_data.lat;
-				p_current_data_point->lon = gnss_data.lon;
+				p_current_data_point->lat = data->lat;
+				p_current_data_point->lon = data->lon;
 #if DEBUG_TEST_PRINT_P
-				printf("Lat/Lon: %f %f ", gnss_data.lat, gnss_data.lon);
+				printf("Lat/Lon: %f %f ", data->lat, data->lon);
 #endif
 			}
-			if (gnss_data.speed_valid)
+			if (data->speed_valid)
 			{
 				any_valid = 1;
 				flag_complete_p_speed = 1;
-				p_current_data_point->speed = gnss_data.speed_kmh;
+				p_current_data_point->speed = data->speed_kmh;
 #if DEBUG_TEST_PRINT_P
-				printf("Speed: %fkm/h ", gnss_data.speed_kmh);
+				printf("Speed: %fkm/h ", data->speed_kmh);
 #endif
 			}
-			if (gnss_data.altitude_valid)
+			if (data->altitude_valid)
 			{
 				any_valid = 1;
 				flag_complete_p_altitude = 1;
-				p_current_data_point->altitude = gnss_data.altitude;
+				p_current_data_point->altitude = data->altitude;
 #if DEBUG_TEST_PRINT_P
-				printf("Altitude: %fm ", gnss_data.altitude);
+				printf("Altitude: %fm ", data->altitude);
 #endif
 			}
-			if (gnss_data.time_valid)
+			if (data->time_valid)
 			{
 				any_valid = 1;
 				flag_complete_p_time = 1;
 				// TODO: encode hour/minute
-				p_current_data_point->gnss_hour = gnss_data.hour;
-				p_current_data_point->gnss_minute = gnss_data.minute;
-				p_current_data_point->gnss_second = gnss_data.second;
+				p_current_data_point->gnss_hour = data->hour;
+				p_current_data_point->gnss_minute = data->minute;
+				p_current_data_point->gnss_second = data->second;
+				static uint32_t last_p = 0;
+				uint32_t now = data->timestamp;
 #if DEBUG_TEST_PRINT_P
-				printf("Time: %02u:%02u:%06.3f ", gnss_data.hour, gnss_data.minute, gnss_data.second);
+				printf("Time: %02u:%02u:%06.3f (%lu ms) ", data->hour, data->minute, data->second, now - last_p);
+				if (now - last_p < 320 || now - last_p > 346)
+				{
+					printf("(OUT OF SYNC) ");
+				}
 #endif
+				last_p = now;
 			}
 			if (any_valid)
 			{
-				p_buffer_write_inc();
+				// If timer to increment is not running yet
+				if (time_p_inc == 0)
+				{
+					// Start timer
+					time_p_inc = HAL_GetTick() + NMEA_PACKET_MERGE_DURATION;
+				}
+				// If the timer was running, the data was merged into the same p_data_point_t
 #if DEBUG_TEST_PRINT_P
 				printf("\r\n");
 #endif
 			}
+		}
+		if (HAL_GetTick() > time_p_inc && time_p_inc != 0)
+		{
+			p_buffer_write_inc();
+			time_p_inc = 0;
 		}
 
 		if (HAL_GetTick() - last_page_change > config.page_duration_ms)
@@ -534,7 +552,7 @@ int main(void)
 	HAL_TIM_Base_Stop_IT(&htim2);
 	HAL_ADC_Stop_IT(&hadc1);
 
-	// Save remaining data
+// Save remaining data
 	if (SD_WriteBuffer(a_file_path, (void*)hbuffer_a.buffer_current, hbuffer_a.write_index * sizeof(a_data_point_t)) != HAL_OK)
 	{
 		Error_Handler();
@@ -1223,7 +1241,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		// Request MEMS data packet
 		if (ADXL_RequestData(&hadxl) == HAL_ERROR)
 		{
-			Error_Handler();
+			printf("(%lu) WARNING: ADXL_RequestData: TxRx failed\r\n", HAL_GetTick());
 		}
 
 		DEBUG_A_TIMER
@@ -1264,22 +1282,30 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
+	DEBUG_ADXL_PROCESS
+
 	ADXL_Data_t adxl_data = ADXL_RxCallback(&hadxl);
 	a_current_data_point->xyz_mems1[0] = adxl_data.x;
 	a_current_data_point->xyz_mems1[1] = adxl_data.y;
 	a_current_data_point->xyz_mems1[2] = adxl_data.z;
 	a_current_data_point->temp_mems1 = adxl_data.temp;
 	flag_complete_a_mems = adxl_data.data_valid;
+
+	DEBUG_ADXL_PROCESS
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
 	if (huart->Instance == UART7)
 	{
+		DEBUG_NMEA_PROCESS
+
 		if (NMEA_ProcessChar(&hnmea) == HAL_ERROR)
 		{
 			Error_Handler();
 		}
+
+		DEBUG_NMEA_PROCESS
 	}
 }
 /* USER CODE END 4 */

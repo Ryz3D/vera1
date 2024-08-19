@@ -146,7 +146,6 @@ HAL_StatusTypeDef ADXL_RequestData(ADXL_t *hadxl)
 	hadxl->state = ADXL_STATE_BUSY_RX;
 	if (HAL_SPI_TransmitReceive_DMA(hadxl->hspi, hadxl->request_buffer, (uint8_t*)hadxl->data_buffer, sizeof(hadxl->request_buffer)) == HAL_ERROR)
 	{
-		printf("(%lu) ERROR: ADXL_RequestData: TxRx failed\r\n", HAL_GetTick());
 		hadxl->state = ADXL_STATE_ERROR;
 		return HAL_ERROR;
 	}

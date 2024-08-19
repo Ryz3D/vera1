@@ -22,6 +22,7 @@
 #define PIEZO_COUNT_MAX 5
 #define A_BUFFER_LEN_MAX 4096
 #define P_BUFFER_LEN_MAX 128
+#define NMEA_PACKET_MERGE_DURATION 10
 
 #define C_F_A_SAMPLING_RATE "a_sampling_rate=%lu"
 #define C_F_P_SAMPLING_RATE "p_sampling_rate=%lu"
@@ -67,7 +68,11 @@ extern config_t default_config, config;
 // Piezo timer interrupt (@ 4 kHz)
 #define DEBUG_A_TIMER ;
 // Piezo ADC result (@ 4 kHz)
-#define DEBUG_ADC_PZ_CONV DEBUG2
+#define DEBUG_ADC_PZ_CONV ;
+// Processing MEMS data
+#define DEBUG_ADXL_PROCESS ;
+// Processing NMEA char/line
+#define DEBUG_NMEA_PROCESS ;
 
 #define DEBUG_TEST_PRINT_CONFIG 1
 #define DEBUG_TEST_ALWAYS_FORMAT_SD 0
@@ -76,7 +81,7 @@ extern config_t default_config, config;
 #define DEBUG_TEST_FIR_FREQUENCY_SWEEP 0
 #define DEBUG_TEST_FIR_DAC 1
 #define DEBUG_TEST_PRINT_A 0
-#define DEBUG_TEST_PRINT_P 1
+#define DEBUG_TEST_PRINT_P 0
 #define DEBUG_TEST_PRINT_NEW_PAGE 0
 
 void Config_Default(void);
