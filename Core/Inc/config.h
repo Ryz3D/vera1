@@ -22,7 +22,7 @@
 #define PIEZO_COUNT_MAX 5
 #define A_BUFFER_LEN_MAX 4096
 #define P_BUFFER_LEN_MAX 128
-#define NMEA_PACKET_MERGE_DURATION 10
+#define NMEA_PACKET_MERGE_DURATION 25
 
 #define C_F_A_SAMPLING_RATE "a_sampling_rate=%lu"
 #define C_F_P_SAMPLING_RATE "p_sampling_rate=%lu"
@@ -57,6 +57,8 @@ extern config_t default_config, config;
 #define DEBUG2 HAL_GPIO_TogglePin(Debug2_GPIO_Port, Debug2_Pin);
 
 // Following defines are called at start and end of a function -> Debug pin is high for entire duration
+// While loop in main function
+#define DEBUG_MAIN_LOOP ;
 // Saving a_buffer_1 to a file
 #define DEBUG_A_BUFFER_1_SD ;
 // Saving a_buffer_2 to a file
@@ -81,7 +83,7 @@ extern config_t default_config, config;
 #define DEBUG_TEST_FIR_FREQUENCY_SWEEP 0
 #define DEBUG_TEST_FIR_DAC 1
 #define DEBUG_TEST_PRINT_A 0
-#define DEBUG_TEST_PRINT_P 0
+#define DEBUG_TEST_PRINT_P 1
 #define DEBUG_TEST_PRINT_NEW_PAGE 0
 
 void Config_Default(void);

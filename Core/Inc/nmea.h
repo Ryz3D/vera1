@@ -30,7 +30,32 @@
 #define NMEA_MODE_MANUAL 'M'
 #define NMEA_MODE_NOT_VALID 'N'
 
-#define NMEA_DATE_WAIT_DURATION 120000
+#define NMEA_PORT_ID_DDC 0
+#define NMEA_PORT_ID_UART1 1
+#define NMEA_PORT_ID_UART2 2
+#define NMEA_PORT_ID_USB 3
+#define NMEA_PORT_ID_SPI 4
+
+#define UBX_GNSS_ID_GPS 0
+#define UBX_GNSS_ID_SBAS 1
+#define UBX_GNSS_ID_GALILEO 2
+#define UBX_GNSS_ID_BEIDOU 3
+#define UBX_GNSS_ID_IMES 4
+#define UBX_GNSS_ID_QZSS 5
+#define UBX_GNSS_ID_GLONASS 6
+
+#define UBX_RESET_BBR_HOT_START 0x0000
+#define UBX_RESET_BBR_WARM_START 0x0001
+#define UBX_RESET_BBR_COLD_START 0xFFFF
+
+#define UBX_RESET_MODE_HW 0x00
+#define UBX_RESET_MODE_SW 0x01
+#define UBX_RESET_MODE_SW_GNSS 0x02
+#define UBX_RESET_MODE_HW_SHUTDOWN 0x04
+#define UBX_RESET_MODE_GNSS_STOP 0x08
+#define UBX_RESET_MODE_GNSS_START 0x09
+
+#define NMEA_DATE_WAIT_DURATION 180000
 #define NMEA_RX_BUFFER_SIZE 512
 #define NMEA_DMA_BUFFER_SIZE 32
 #define NMEA_CIRCULAR_BUFFER_SIZE 128
@@ -63,7 +88,8 @@ typedef struct
 typedef struct
 {
 	UART_HandleTypeDef *huart;
-	uint32_t timeout;
+	uint32_t tx_timeout;
+	uint32_t rx_timeout;
 	uint32_t baud;
 	uint8_t sampling_rate;
 	volatile char dma_buffer[NMEA_DMA_BUFFER_SIZE];
@@ -72,7 +98,8 @@ typedef struct
 	volatile char line_buffer[NMEA_RX_BUFFER_SIZE];
 	volatile uint32_t circular_read_index;
 	volatile uint32_t circular_write_index;
-	NMEA_Data_t circular_buffer[NMEA_CIRCULAR_BUFFER_SIZE];
+	volatile char circular_buffer[NMEA_CIRCULAR_BUFFER_SIZE][NMEA_RX_BUFFER_SIZE];
+	uint16_t last_ubx_header;
 } NMEA_t;
 
 extern const char nmea_pformat_rmc[];
@@ -142,18 +169,18 @@ typedef struct
 } NMEA_Packet_VTG_t;
 
 // header = Class, ID, Length
-#define NMEA_UBX_RATE_HEADER (0x06 | (0x08 << 8) | (6 << 16))
+#define NMEA_UBX_CFG_RATE_HEADER (0x06 | (0x08 << 8) | (6 << 16))
 typedef struct
 {
 	uint16_t measRate;
 	uint16_t navRate;
 	uint16_t timeRef;
-} NMEA_UBX_RATE_t;
+} NMEA_UBX_CFG_RATE_t;
 
-#define NMEA_UBX_PRT_HEADER (0x06 | (0x00 << 8) | (20 << 16))
+#define NMEA_UBX_CFG_PRT_HEADER (0x06 | (0x00 << 8) | (20 << 16))
 typedef struct
 {
-	uint8_t portID;
+	uint8_t portID; // See #define NMEA_PORT_ID_XXX
 	uint16_t txReady;
 	uint32_t mode;
 	uint32_t baudRate;
@@ -161,13 +188,52 @@ typedef struct
 	uint16_t outProtoMask;
 	uint16_t flags;
 	uint16_t reserved;
-} NMEA_UBX_PRT_t;
+} NMEA_UBX_CFG_PRT_t;
 
-HAL_StatusTypeDef NMEA_SendPUBX(NMEA_t *hnmea, char *msg_buffer);
-HAL_StatusTypeDef NMEA_SendUBX(NMEA_t *hnmea, uint32_t header, void *packet, size_t packet_size);
+#define NMEA_UBX_CFG_GNSS_NUMCONFIGBLOCKS 2
+#define NMEA_UBX_CFG_GNSS_HEADER (0x06 | (0x3E << 8) | ((4 + 8 * NMEA_UBX_CFG_GNSS_NUMCONFIGBLOCKS) << 16))
+
+typedef struct
+{
+	uint8_t gnssId; // See #define UBX_GNSS_ID_XXX
+	uint8_t resTrkCh;
+	uint8_t maxTrkCh;
+	uint32_t flags;
+} NMEA_UBX_CFG_GNSS_CFGBLOCK_t;
+
+typedef struct
+{
+	uint8_t msgVer;
+	uint8_t numTrkChHw;
+	uint8_t numTrkChUse;
+	uint8_t numConfigBlocks;
+	NMEA_UBX_CFG_GNSS_CFGBLOCK_t configBlocks[NMEA_UBX_CFG_GNSS_NUMCONFIGBLOCKS];
+} NMEA_UBX_CFG_GNSS_t;
+
+#define NMEA_UBX_CFG_CFG_HEADER (0x06 | (0x09 << 8) | (12 << 16))
+
+typedef struct
+{
+	uint32_t clearMask;
+	uint32_t saveMask;
+	uint32_t loadMask;
+} NMEA_UBX_CFG_CFG_t;
+
+#define NMEA_UBX_CFG_RST_HEADER (0x06 | (0x04 << 8) | (4 << 16))
+
+typedef struct
+{
+	uint16_t navBbrMask;
+	uint8_t resetMode;
+	uint8_t reserved;
+} NMEA_UBX_CFG_RST_t;
+
+HAL_StatusTypeDef NMEA_TxPUBX(NMEA_t *hnmea, char *msg_buffer);
+HAL_StatusTypeDef NMEA_TxUBX(NMEA_t *hnmea, uint32_t header, void *packet, size_t packet_size);
+HAL_StatusTypeDef NMEA_RxAckUBX(NMEA_t *hnmea);
 HAL_StatusTypeDef NMEA_Init(NMEA_t *hnmea);
 NMEA_Data_t NMEA_GetDate(NMEA_t *hnmea);
-HAL_StatusTypeDef NMEA_ProcessChar(NMEA_t *hnmea);
+HAL_StatusTypeDef NMEA_ProcessDMABuffer(NMEA_t *hnmea);
 uint8_t NMEA_ProcessLine(NMEA_t *hnmea, NMEA_Data_t *data);
 
 #endif /* INC_NMEA_H_ */

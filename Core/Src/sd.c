@@ -134,6 +134,8 @@ HAL_StatusTypeDef SD_FlushLog(void)
 		return HAL_OK;
 	}
 
+	// TODO: log file size (reset to 0), log num, new file
+
 	if (SD_WriteBuffer(log_file_path, (void*)sd_log, sd_log_write_index) != HAL_OK)
 	{
 		return HAL_ERROR;

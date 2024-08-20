@@ -375,6 +375,9 @@ int main(void)
 		/* USER CODE END WHILE */
 
 		/* USER CODE BEGIN 3 */
+		DEBUG_MAIN_LOOP
+
+		// Blink dir_num with LD1 (green)
 		if (HAL_GetTick() - boot_duration < 2000)
 		{
 			HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
@@ -418,7 +421,6 @@ int main(void)
 			hbuffer_a.flag_save_buffer_2 = 0;
 			DEBUG_A_BUFFER_2_SD
 		}
-		// a_buffer overflow
 		if (hbuffer_a.flag_overflow)
 		{
 			printf("(%lu) WARNING: main: a_buffer overflow\r\n", HAL_GetTick());
@@ -449,7 +451,6 @@ int main(void)
 			hbuffer_p.flag_save_buffer_2 = 0;
 			DEBUG_P_BUFFER_2_SD
 		}
-		// p_buffer overflow
 		if (hbuffer_p.flag_overflow)
 		{
 			printf("(%lu) WARNING: main: p_buffer overflow\r\n", HAL_GetTick());
@@ -457,53 +458,51 @@ int main(void)
 		}
 
 		// Process NMEA data
-		while (hnmea.circular_write_index != hnmea.circular_read_index)
+		NMEA_Data_t data;
+		while (NMEA_ProcessLine(&hnmea, &data))
 		{
-			NMEA_Data_t *data = &hnmea.circular_buffer[hnmea.circular_read_index];
-			hnmea.circular_read_index = (hnmea.circular_read_index + 1) % NMEA_CIRCULAR_BUFFER_SIZE;
-
 			uint8_t any_valid = 0;
-			if (data->position_valid)
+			if (data.position_valid)
 			{
 				any_valid = 1;
 				flag_complete_p_position = 1;
-				p_current_data_point->lat = data->lat;
-				p_current_data_point->lon = data->lon;
+				p_current_data_point->lat = data.lat;
+				p_current_data_point->lon = data.lon;
 #if DEBUG_TEST_PRINT_P
-				printf("Lat/Lon: %f %f ", data->lat, data->lon);
+				printf("Lat/Lon: %f %f ", data.lat, data.lon);
 #endif
 			}
-			if (data->speed_valid)
+			if (data.speed_valid)
 			{
 				any_valid = 1;
 				flag_complete_p_speed = 1;
-				p_current_data_point->speed = data->speed_kmh;
+				p_current_data_point->speed = data.speed_kmh;
 #if DEBUG_TEST_PRINT_P
-				printf("Speed: %fkm/h ", data->speed_kmh);
+				printf("Speed: %fkm/h ", data.speed_kmh);
 #endif
 			}
-			if (data->altitude_valid)
+			if (data.altitude_valid)
 			{
 				any_valid = 1;
 				flag_complete_p_altitude = 1;
-				p_current_data_point->altitude = data->altitude;
+				p_current_data_point->altitude = data.altitude;
 #if DEBUG_TEST_PRINT_P
-				printf("Altitude: %fm ", data->altitude);
+				printf("Altitude: %fm ", data.altitude);
 #endif
 			}
-			if (data->time_valid)
+			if (data.time_valid)
 			{
 				any_valid = 1;
 				flag_complete_p_time = 1;
 				// TODO: encode hour/minute
-				p_current_data_point->gnss_hour = data->hour;
-				p_current_data_point->gnss_minute = data->minute;
-				p_current_data_point->gnss_second = data->second;
+				p_current_data_point->gnss_hour = data.hour;
+				p_current_data_point->gnss_minute = data.minute;
+				p_current_data_point->gnss_second = data.second;
 				static uint32_t last_p = 0;
-				uint32_t now = data->timestamp;
+				uint32_t now = data.timestamp;
 #if DEBUG_TEST_PRINT_P
-				printf("Time: %02u:%02u:%06.3f (%lu ms) ", data->hour, data->minute, data->second, now - last_p);
-				if (now - last_p < 320 || now - last_p > 346)
+				printf("Time: %02u:%02u:%06.3f (%lu ms) ", data.hour, data.minute, data.second, now - last_p);
+				if (now - last_p < 750 / config.p_sampling_rate || now - last_p > 1250 / config.p_sampling_rate)
 				{
 					printf("(OUT OF SYNC) ");
 				}
@@ -526,8 +525,8 @@ int main(void)
 		}
 		if (HAL_GetTick() > time_p_inc && time_p_inc != 0)
 		{
-			p_buffer_write_inc();
 			time_p_inc = 0;
+			p_buffer_write_inc();
 		}
 
 		if (HAL_GetTick() - last_page_change > config.page_duration_ms)
@@ -547,6 +546,8 @@ int main(void)
 			capture_running = 0;
 			break;
 		}
+
+		DEBUG_MAIN_LOOP
 	}
 
 	HAL_TIM_Base_Stop_IT(&htim2);
@@ -1015,16 +1016,16 @@ static void MX_DMA_Init(void)
 	HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 0, 0);
 	HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
 	/* DMA2_Stream0_IRQn interrupt configuration */
-	HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
+	HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 1, 1);
 	HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
 	/* DMA2_Stream1_IRQn interrupt configuration */
-	HAL_NVIC_SetPriority(DMA2_Stream1_IRQn, 0, 0);
+	HAL_NVIC_SetPriority(DMA2_Stream1_IRQn, 2, 2);
 	HAL_NVIC_EnableIRQ(DMA2_Stream1_IRQn);
 	/* DMA2_Stream3_IRQn interrupt configuration */
 	HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 0, 0);
 	HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
 	/* DMA2_Stream4_IRQn interrupt configuration */
-	HAL_NVIC_SetPriority(DMA2_Stream4_IRQn, 0, 0);
+	HAL_NVIC_SetPriority(DMA2_Stream4_IRQn, 2, 2);
 	HAL_NVIC_EnableIRQ(DMA2_Stream4_IRQn);
 	/* DMA2_Stream6_IRQn interrupt configuration */
 	HAL_NVIC_SetPriority(DMA2_Stream6_IRQn, 0, 0);
@@ -1186,24 +1187,22 @@ static void MX_GPIO_Init(void)
  */
 PUTCHAR_PROTOTYPE
 {
-	/* Place your implementation of fputc here */
-	/* e.g. write a character to the USART1 and Loop until the end of transmission */
-	HAL_UART_Transmit(&huart3, (uint8_t*)&ch, 1, HAL_MAX_DELAY);
-
 	if (sd_log_write_index < SD_LOG_LEN)
 	{
 		sd_log[sd_log_write_index++] = (char)ch;
 	}
+
+	HAL_UART_Transmit(&huart3, (uint8_t*)&ch, 1, 10);
 
 	return ch;
 }
 
 void a_buffer_write_inc()
 {
-	// Set complete bits of last data point
+// Set complete bits of last data point
 	a_current_data_point->complete |= (1 << A_COMPLETE_TIMESTAMP) | (flag_complete_a_mems << A_COMPLETE_MEMS) | (flag_complete_a_pz << A_COMPLETE_PZ);
 
-	// TODO: can you get first sample valid?
+// TODO: can you get first sample valid?
 	if (ticks_counter > 4)
 	{
 		Double_Buffer_Increment(&hbuffer_a);
@@ -1215,7 +1214,7 @@ void a_buffer_write_inc()
 
 void p_buffer_write_inc()
 {
-	// Set complete bits of last data point
+// Set complete bits of last data point
 	p_current_data_point->complete |= (1 << P_COMPLETE_TIMESTAMP) | (flag_complete_p_position << P_COMPLETE_POSITION) | (flag_complete_p_speed << P_COMPLETE_SPEED)
 		| (flag_complete_p_altitude << P_COMPLETE_ALTITUDE) | (flag_complete_p_time << P_COMPLETE_GNSS_TIME);
 
@@ -1300,7 +1299,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 	{
 		DEBUG_NMEA_PROCESS
 
-		if (NMEA_ProcessChar(&hnmea) == HAL_ERROR)
+		if (NMEA_ProcessDMABuffer(&hnmea) == HAL_ERROR)
 		{
 			Error_Handler();
 		}

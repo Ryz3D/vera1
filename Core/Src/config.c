@@ -10,12 +10,12 @@
 config_t default_config =
 	{
 		.a_sampling_rate = 4000, // 4000 (Sa/s)
-		.p_sampling_rate = 3, // 10 (Sa/s)
+		.p_sampling_rate = 3, // 3 (Sa/s)
 		.oversampling_ratio = 4, // 4 (16 kSa/s)
 		.piezo_count = 5, // 3
 		.a_buffer_len = 4096, // 4096 (Sa)
 		.p_buffer_len = 128, // 128 (Sa)
-		.page_duration_ms = 1 * 60 * 1000 // default: 10 * 60 * 1000
+		.page_duration_ms = 2 * 60 * 1000 // default: 2 * 60 * 1000
 	};
 
 config_t config;
