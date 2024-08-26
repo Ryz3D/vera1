@@ -32,73 +32,37 @@ void Debug_test_FIR_frequency_sweep(FIR_t *hfir)
 {
 	float freqs[400];
 	float amps[400];
-	float delays[400];
 
 	for (uint16_t f_i = 0; f_i < 400; f_i++)
 	{
 		freqs[f_i] = 10 + f_i * 10;
 		amps[f_i] = 0;
-		delays[f_i] = 0;
 	}
 
 	for (uint16_t f_i = 0; f_i < 400; f_i++)
 	{
 		uint32_t sim_t = 0;
-		float a_max = 0;
-		uint8_t delay_set = 0;
+		int16_t a_max = 0;
 		for (uint16_t iter = 0; iter < 400; iter++)
 		{
 			for (uint8_t i = 0; i < config.oversampling_ratio; i++)
 			{
-				hfir->In[i] = sin(2.0f * PI * freqs[f_i] / 16000.0f * (float)sim_t);
+				hfir->In[i] = (int16_t)(8192.0f * arm_sin_f32(2.0f * PI * freqs[f_i] / 16000.0f * (float)sim_t));
 				sim_t++;
 			}
 			FIR_Update(hfir);
 			for (uint8_t i = 0; i < config.oversampling_ratio; i++)
 			{
 				a_max = hfir->Out[i] > a_max ? hfir->Out[i] : a_max;
-				if (a_max > 0.1 && delay_set == 0)
-				{
-					delays[f_i] = (float)sim_t / 16000.0f;
-					delay_set = 1;
-				}
 			}
 		}
 		amps[f_i] = a_max;
-		for (uint8_t i = 0; i < config.oversampling_ratio; i++)
-		{
-			hfir->In[i] = 0;
-		}
-		for (uint8_t j = 0; j < 10; j++)
-		{
-			FIR_Update(hfir);
-		}
 	}
-
-	/*
-	 printf("%f", hfir_pz[0].Out[i]);
-	 int16_t k;
-	 if (hfir_pz[0].Out[i] < -1.0f)
-	 hfir_pz[0].Out[i] = -1.0f;
-	 else if (hfir_pz[0].Out[i] > -1.0f)
-	 hfir_pz[0].Out[i] = 1.0f;
-	 k = (int16_t)(hfir_pz[0].Out[i] * 0xFFF); // 13 bit?, 24 bit -> 0x7FFFFF (do this and bit shift?), 12 bit -> 0x7FF
-	 printf(" (%hi)\r\n", k);
-	 */
 
 	printf("[");
 	for (uint16_t i = 0; i < 400; i++)
 	{
-		printf("(%hu, %.4f)", (uint16_t)freqs[i], amps[i]);
-		if (i < 399)
-			printf(",");
-	}
-	printf("]\r\n\r\n");
-
-	printf("[");
-	for (uint16_t i = 0; i < 400; i++)
-	{
-		printf("(%hu, %.4f)", (uint16_t)freqs[i], delays[i]);
+		printf("(%hu, %.4f)", (uint16_t)freqs[i], amps[i] / 8192.0f);
 		if (i < 399)
 			printf(",");
 	}
@@ -124,6 +88,31 @@ void Debug_test_print_a(volatile a_data_point_t *buffer)
 	printf("(%lu) Peak-peak: Piezo: %.3f V\tMEMS: %.3f\tOffset: Piezo: %.3f V\tMEMS: %.3f\r\n", HAL_GetTick(), pz_ampl, mems_ampl, pz_offs, mems_offs);
 }
 
-void Debug_test_print_p(volatile p_data_point_t *buffer)
+void Debug_test_print_p(volatile p_data_point_t *dp)
 {
+	uint8_t any_valid = 0;
+	if (dp->complete & (1 << P_COMPLETE_GNSS_TIME))
+	{
+		any_valid = 1;
+		printf("UTC: %02u:%02u:%06.3f ", dp->gnss_hour, dp->gnss_minute, dp->gnss_second);
+	}
+	if (dp->complete & (1 << P_COMPLETE_POSITION))
+	{
+		any_valid = 1;
+		printf("Lat/Lon: %.3f %.3f ", dp->lat, dp->lon);
+	}
+	if (dp->complete & (1 << P_COMPLETE_SPEED))
+	{
+		any_valid = 1;
+		printf("Speed: %.1fkm/h ", dp->speed);
+	}
+	if (dp->complete & (1 << P_COMPLETE_ALTITUDE))
+	{
+		any_valid = 1;
+		printf("Altitude: %.1fm ", dp->altitude);
+	}
+	if (any_valid)
+	{
+		printf("\r\n");
+	}
 }

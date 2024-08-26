@@ -65,12 +65,12 @@ HAL_StatusTypeDef NMEA_TxUBX(NMEA_t *hnmea, uint32_t header, void *packet, size_
 HAL_StatusTypeDef NMEA_RxAckUBX(NMEA_t *hnmea)
 {
 	uint8_t header = 0;
-	for (uint8_t i = 0; i < 25; i++)
+	for (uint32_t i = 0; i < 100; i++)
 	{
-		HAL_UART_Receive(hnmea->huart, &header, sizeof(uint8_t), 1);
+		HAL_UART_Receive(hnmea->huart, &header, sizeof(uint8_t), 10);
 		if (header == 0xB5)
 		{
-			HAL_UART_Receive(hnmea->huart, &header, sizeof(uint8_t), 1);
+			HAL_UART_Receive(hnmea->huart, &header, sizeof(uint8_t), 10);
 			if (header == 0x62)
 			{
 				break;
@@ -140,10 +140,10 @@ HAL_StatusTypeDef NMEA_Init(NMEA_t *hnmea)
 	hnmea->circular_write_index = 0;
 	hnmea->last_ubx_header = 0;
 
-// Delay to let GNSS-module boot
+	// Delay to let GNSS-module boot
 	HAL_Delay(1000);
 
-// Set baud rate
+	// Set baud rate
 	char pubx_buffer[100];
 	uint16_t inProto = 0b000011; // Module should accept NMEA and UBX via UART
 	uint16_t outProto = 0b000010; // Module should transmit NMEA via UART
@@ -161,7 +161,7 @@ HAL_StatusTypeDef NMEA_Init(NMEA_t *hnmea)
 	}
 	HAL_Delay(250);
 
-// Set output data rate
+	// Set output data rate
 	NMEA_UBX_CFG_RATE_t ubx_rate = {
 		.measRate = 1000 / hnmea->sampling_rate,
 		.navRate = 1,
@@ -184,7 +184,7 @@ HAL_StatusTypeDef NMEA_Init(NMEA_t *hnmea)
 
 NMEA_Data_t NMEA_GetDate(NMEA_t *hnmea)
 {
-	printf("(%lu) Waiting for GNSS date (tx_timeout after %i s)...\r\n", HAL_GetTick(), NMEA_DATE_WAIT_DURATION / 1000);
+	printf("(%lu) Waiting for GNSS date (timeout after %i s)...\r\n", HAL_GetTick(), NMEA_DATE_WAIT_DURATION / 1000);
 
 	NMEA_Data_t data = {
 		.position_valid = 0,
@@ -213,7 +213,7 @@ NMEA_Data_t NMEA_GetDate(NMEA_t *hnmea)
 
 HAL_StatusTypeDef NMEA_ProcessDMABuffer(NMEA_t *hnmea)
 {
-// UBX: read single char until header, read length
+	// UBX: read single char until header, read length
 	for (uint32_t i = 0; i < NMEA_DMA_BUFFER_SIZE; i++)
 	{
 		if (hnmea->dma_buffer[i] == '\n')
@@ -410,7 +410,7 @@ char temp_buf[1000];
 
 void NMEA_ParsePacket(NMEA_t *hnmea, void *packet_buffer, const char format[])
 {
-// Skip message header
+	// Skip message header
 	volatile char *line_buffer = hnmea->circular_buffer[hnmea->circular_read_index];
 	volatile char *line_pointer = line_buffer;
 	while (*line_pointer != ',' && *line_pointer != '\0')
@@ -419,9 +419,9 @@ void NMEA_ParsePacket(NMEA_t *hnmea, void *packet_buffer, const char format[])
 	}
 	line_pointer++;
 
-// Find end of string to compare against
+	// Find end of string to compare against
 	volatile char *line_end_pointer = line_buffer + strlen((char*)line_buffer);
-// Pointer to currently processed character
+	// Pointer to currently processed character
 	void *buffer_pointer = packet_buffer;
 	for (uint8_t i_format = 0; i_format < strlen(format) && line_pointer < line_end_pointer; i_format++)
 	{

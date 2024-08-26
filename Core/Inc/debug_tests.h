@@ -17,6 +17,6 @@
 void Debug_test_print_config();
 void Debug_test_FIR_frequency_sweep(FIR_t *hfir);
 void Debug_test_print_a(volatile a_data_point_t *buffer);
-void Debug_test_print_p(volatile p_data_point_t *buffer);
+void Debug_test_print_p(volatile p_data_point_t *dp);
 
 #endif /* INC_DEBUG_TESTS_H_ */

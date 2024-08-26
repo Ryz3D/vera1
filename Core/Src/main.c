@@ -19,9 +19,12 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "fatfs.h"
+#include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "usbd_cdc_if.h"
+#include "platform.h"
 #include "sd.h"
 #include "config.h"
 #include "data_points.h"
@@ -65,8 +68,10 @@ TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 
 UART_HandleTypeDef huart7;
+UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart3;
 DMA_HandleTypeDef hdma_uart7_rx;
+DMA_HandleTypeDef hdma_usart1_rx;
 
 /* USER CODE BEGIN PV */
 ADXL_t hadxl; // MEMS sensor ADXL-357
@@ -78,6 +83,11 @@ uint32_t last_page_change = 0; // Time of last call to SD_NewPage
 volatile uint8_t capture_running = 0; // 0: Not running, 1: running
 volatile uint32_t ticks_counter = 0; // Increments with each acceleration data point
 uint32_t time_p_inc = 0; // When a valid NMEA packet is received, this is set to end time of current data point (NMEA_PACKET_MERGE_DURATION)
+uint32_t time_p_last = 0; // Time of last NMEA packet
+uint32_t time_p_last_lock = 0; // Time of last NMEA packet with valid position
+
+char cdc_buf[128]; // Buffer for USB serial port (logging)
+uint8_t cdc_buf_i = 0;
 
 volatile uint16_t pz_dma_buffer[PIEZO_COUNT_MAX * OVERSAMPLING_RATIO_MAX];
 
@@ -110,6 +120,7 @@ static void MX_TIM3_Init(void);
 static void MX_DAC_Init(void);
 static void MX_SPI4_Init(void);
 static void MX_UART7_Init(void);
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 void a_buffer_write_inc(void);
 void p_buffer_write_inc(void);
@@ -157,28 +168,42 @@ int main(void)
 	MX_DAC_Init();
 	MX_SPI4_Init();
 	MX_UART7_Init();
+	MX_USB_DEVICE_Init();
+	MX_USART1_UART_Init();
 	/* USER CODE BEGIN 2 */
-	HAL_Delay(1);
 
-	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
-	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
-	printf("(%lu) Booting...\r\n", HAL_GetTick());
-
-	// Init SD card
-#if DEBUG_TEST_NEVER_FORMAT_SD == 0
+	// Check if card should be formatted -> either by config or by button push
 	uint8_t do_format_sd = DEBUG_TEST_ALWAYS_FORMAT_SD;
+#if DEBUG_TEST_NEVER_FORMAT_SD
+	do_format_sd = 0;
+#else
 	if (HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin) == GPIO_PIN_SET)
 	{
 		do_format_sd = 1;
 	}
+#endif
+
+	// Boot blink sequence
+	for (uint8_t i = 0; i < 3; i++)
+	{
+		HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, i == 0 ? GPIO_PIN_SET : GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, i == 1 ? GPIO_PIN_SET : GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, i == 2 ? GPIO_PIN_SET : GPIO_PIN_RESET);
+		HAL_Delay(125);
+	}
+	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
+
+	printf("(%lu) Booting...\r\n", HAL_GetTick());
+
+	// Init SD card
 	if (do_format_sd)
 	{
 		HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
 		HAL_Delay(100);
 		HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
 	}
-#endif
 	if (SD_Init(do_format_sd) != HAL_OK)
 	{
 		Error_Handler();
@@ -205,6 +230,10 @@ int main(void)
 	{
 		printf("(%lu) No config found, writing default...\r\n", HAL_GetTick());
 		Config_Save(config_buffer, sizeof(config_buffer));
+		if (SD_TouchFile(CONFIG_FILE_PATH) != HAL_OK)
+		{
+			Error_Handler();
+		}
 		if (SD_WriteBuffer(CONFIG_FILE_PATH, config_buffer, strlen(config_buffer)) != HAL_OK)
 		{
 			Error_Handler();
@@ -237,18 +266,20 @@ int main(void)
 	p_current_data_point = ((volatile p_data_point_t*)hbuffer_p.buffer_current) + hbuffer_p.write_index;
 
 	// Initialize ADXL357
-	hadxl.hspi = &hspi4;
-	hadxl.CS_GPIO_Port = SPI4_CS_GPIO_Port;
-	hadxl.CS_Pin = SPI4_CS_Pin;
+	hadxl.hspi = &ADXL_SPI;
 	hadxl.timeout = 100;
+	hadxl.CS_GPIO_Port = ADXL_CS_GPIO_Port;
+	hadxl.CS_Pin = ADXL_CS_Pin;
 	if (ADXL_Init(&hadxl) == HAL_ERROR)
 	{
 		Error_Handler();
 	}
 
 	// Initialize u-blox 8
-	hnmea.huart = &huart7;
+	hnmea.huart = &NMEA_HUART;
 	hnmea.baud = 115200;
+	hnmea.tx_timeout = 1000;
+	hnmea.rx_timeout = 1000;
 	hnmea.sampling_rate = config.p_sampling_rate;
 	if (NMEA_Init(&hnmea) == HAL_ERROR)
 	{
@@ -266,7 +297,15 @@ int main(void)
 		sd_year = gnss_data.year + 2000;
 		sd_month = gnss_data.month;
 		sd_day = gnss_data.day;
-		printf("(%lu) GNSS date: %02hu_%02u_%02u\r\n", HAL_GetTick(), sd_year, sd_month, sd_day);
+		printf("(%lu) GNSS date: %02hu_%02u_%02u ", HAL_GetTick(), sd_year, sd_month, sd_day);
+		if (gnss_data.time_valid)
+		{
+			printf("%02u:%02u:%06.3f\r\n", gnss_data.hour, gnss_data.minute, gnss_data.second);
+		}
+		else
+		{
+			printf("\r\n");
+		}
 	}
 	else
 	{
@@ -362,6 +401,10 @@ int main(void)
 	SD_NewPage(1);
 	// Offset so page change doesn't happen simultaneously with buffer save
 	last_page_change = HAL_GetTick() - 181;
+
+	// Wait for NMEA_NO_PACKET_DURATION from this point
+	time_p_last = HAL_GetTick();
+	time_p_last_lock = HAL_GetTick();
 
 	printf("(%lu) Page %li (\"%s\", \"%s\")\r\n", HAL_GetTick(), page_num, a_file_path, p_file_path);
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
@@ -465,69 +508,63 @@ int main(void)
 			if (data.position_valid)
 			{
 				any_valid = 1;
+				time_p_last_lock = HAL_GetTick();
 				flag_complete_p_position = 1;
 				p_current_data_point->lat = data.lat;
 				p_current_data_point->lon = data.lon;
-#if DEBUG_TEST_PRINT_P
-				printf("Lat/Lon: %f %f ", data.lat, data.lon);
-#endif
 			}
 			if (data.speed_valid)
 			{
 				any_valid = 1;
 				flag_complete_p_speed = 1;
 				p_current_data_point->speed = data.speed_kmh;
-#if DEBUG_TEST_PRINT_P
-				printf("Speed: %fkm/h ", data.speed_kmh);
-#endif
 			}
 			if (data.altitude_valid)
 			{
 				any_valid = 1;
 				flag_complete_p_altitude = 1;
 				p_current_data_point->altitude = data.altitude;
-#if DEBUG_TEST_PRINT_P
-				printf("Altitude: %fm ", data.altitude);
-#endif
 			}
 			if (data.time_valid)
 			{
 				any_valid = 1;
 				flag_complete_p_time = 1;
-				// TODO: encode hour/minute
 				p_current_data_point->gnss_hour = data.hour;
 				p_current_data_point->gnss_minute = data.minute;
 				p_current_data_point->gnss_second = data.second;
-				static uint32_t last_p = 0;
-				uint32_t now = data.timestamp;
-#if DEBUG_TEST_PRINT_P
-				printf("Time: %02u:%02u:%06.3f (%lu ms) ", data.hour, data.minute, data.second, now - last_p);
-				if (now - last_p < 750 / config.p_sampling_rate || now - last_p > 1250 / config.p_sampling_rate)
-				{
-					printf("(OUT OF SYNC) ");
-				}
-#endif
-				last_p = now;
 			}
 			if (any_valid)
 			{
+				time_p_last = HAL_GetTick();
 				// If timer to increment is not running yet
 				if (time_p_inc == 0)
 				{
 					// Start timer
 					time_p_inc = HAL_GetTick() + NMEA_PACKET_MERGE_DURATION;
 				}
-				// If the timer was running, the data was merged into the same p_data_point_t
-#if DEBUG_TEST_PRINT_P
-				printf("\r\n");
-#endif
+				// If the timer was running, the data was merged into the same p_data_point_t and the timer keeps running
 			}
 		}
+		// Next position data point if timer ended
 		if (HAL_GetTick() > time_p_inc && time_p_inc != 0)
 		{
 			time_p_inc = 0;
 			p_buffer_write_inc();
 		}
+		// Warning if no NMEA data
+		if (HAL_GetTick() - time_p_last > NMEA_NO_PACKET_DURATION && time_p_last != 0)
+		{
+			printf("(%lu) WARNING: No NMEA data\r\n", HAL_GetTick());
+			time_p_last = 0;
+		}
+#if DEBUG_TEST_PRINT_NO_LOCATION
+		// Warning if no position lock
+		if (HAL_GetTick() - time_p_last_lock > NMEA_NO_PACKET_DURATION && time_p_last_lock != 0)
+		{
+			printf("(%lu) WARNING: No position lock\r\n", HAL_GetTick());
+			time_p_last_lock = 0;
+		}
+#endif
 
 		if (HAL_GetTick() - last_page_change > config.page_duration_ms)
 		{
@@ -541,13 +578,14 @@ int main(void)
 		{
 			HAL_UART_Transmit(&huart3, (const uint8_t*)str_sd_log_error, strlen(str_sd_log_error), 1000);
 		}
+
+		DEBUG_MAIN_LOOP
+
 		if (HAL_GPIO_ReadPin(USER_Btn_GPIO_Port, USER_Btn_Pin) == GPIO_PIN_SET)
 		{
 			capture_running = 0;
 			break;
 		}
-
-		DEBUG_MAIN_LOOP
 	}
 
 	HAL_TIM_Base_Stop_IT(&htim2);
@@ -588,10 +626,6 @@ void SystemClock_Config(void)
 		0 };
 	RCC_ClkInitTypeDef RCC_ClkInitStruct = {
 		0 };
-
-	/** Configure LSE Drive Capability
-	 */
-	HAL_PWR_EnableBkUpAccess();
 
 	/** Configure the main internal regulator output voltage
 	 */
@@ -967,6 +1001,42 @@ static void MX_UART7_Init(void)
 }
 
 /**
+ * @brief USART1 Initialization Function
+ * @param None
+ * @retval None
+ */
+static void MX_USART1_UART_Init(void)
+{
+
+	/* USER CODE BEGIN USART1_Init 0 */
+
+	/* USER CODE END USART1_Init 0 */
+
+	/* USER CODE BEGIN USART1_Init 1 */
+
+	/* USER CODE END USART1_Init 1 */
+	huart1.Instance = USART1;
+	huart1.Init.BaudRate = 9600;
+	huart1.Init.WordLength = UART_WORDLENGTH_8B;
+	huart1.Init.StopBits = UART_STOPBITS_1;
+	huart1.Init.Parity = UART_PARITY_NONE;
+	huart1.Init.Mode = UART_MODE_TX_RX;
+	huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+	huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+	huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+	huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_RXOVERRUNDISABLE_INIT;
+	huart1.AdvancedInit.OverrunDisable = UART_ADVFEATURE_OVERRUN_DISABLE;
+	if (HAL_UART_Init(&huart1) != HAL_OK)
+	{
+		Error_Handler();
+	}
+	/* USER CODE BEGIN USART1_Init 2 */
+
+	/* USER CODE END USART1_Init 2 */
+
+}
+
+/**
  * @brief USART3 Initialization Function
  * @param None
  * @retval None
@@ -1021,6 +1091,9 @@ static void MX_DMA_Init(void)
 	/* DMA2_Stream1_IRQn interrupt configuration */
 	HAL_NVIC_SetPriority(DMA2_Stream1_IRQn, 2, 2);
 	HAL_NVIC_EnableIRQ(DMA2_Stream1_IRQn);
+	/* DMA2_Stream2_IRQn interrupt configuration */
+	HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, 0, 0);
+	HAL_NVIC_EnableIRQ(DMA2_Stream2_IRQn);
 	/* DMA2_Stream3_IRQn interrupt configuration */
 	HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 0, 0);
 	HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
@@ -1118,14 +1191,6 @@ static void MX_GPIO_Init(void)
 	GPIO_InitStruct.Alternate = GPIO_AF11_ETH;
 	HAL_GPIO_Init(RMII_TXD1_GPIO_Port, &GPIO_InitStruct);
 
-	/*Configure GPIO pin : PB15 */
-	GPIO_InitStruct.Pin = GPIO_PIN_15;
-	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-	GPIO_InitStruct.Alternate = GPIO_AF4_USART1;
-	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
 	/*Configure GPIO pins : uSD_Detect_Pin USB_OverCurrent_Pin */
 	GPIO_InitStruct.Pin = uSD_Detect_Pin | USB_OverCurrent_Pin;
 	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
@@ -1138,20 +1203,6 @@ static void MX_GPIO_Init(void)
 	GPIO_InitStruct.Pull = GPIO_NOPULL;
 	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
 	HAL_GPIO_Init(USB_PowerSwitchOn_GPIO_Port, &GPIO_InitStruct);
-
-	/*Configure GPIO pins : USB_SOF_Pin USB_ID_Pin USB_DM_Pin USB_DP_Pin */
-	GPIO_InitStruct.Pin = USB_SOF_Pin | USB_ID_Pin | USB_DM_Pin | USB_DP_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-	GPIO_InitStruct.Alternate = GPIO_AF10_OTG_FS;
-	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-	/*Configure GPIO pin : USB_VBUS_Pin */
-	GPIO_InitStruct.Pin = USB_VBUS_Pin;
-	GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-	GPIO_InitStruct.Pull = GPIO_NOPULL;
-	HAL_GPIO_Init(USB_VBUS_GPIO_Port, &GPIO_InitStruct);
 
 	/*Configure GPIO pins : MEMS_DRDY_Pin MEMS_INT2_Pin MEMS_INT1_Pin */
 	GPIO_InitStruct.Pin = MEMS_DRDY_Pin | MEMS_INT2_Pin | MEMS_INT1_Pin;
@@ -1192,7 +1243,16 @@ PUTCHAR_PROTOTYPE
 		sd_log[sd_log_write_index++] = (char)ch;
 	}
 
+	cdc_buf[cdc_buf_i++] = ch;
+	if (cdc_buf_i >= sizeof(cdc_buf) || ch == '\n')
+	{
+		CDC_Transmit_FS((uint8_t*)cdc_buf, cdc_buf_i);
+		// check if USBD_OK -> don't clear buffer if not ok
+		cdc_buf_i = 0;
+	}
+
 	HAL_UART_Transmit(&huart3, (uint8_t*)&ch, 1, 10);
+	// check if HAL_OK -> UART buffer
 
 	return ch;
 }
@@ -1200,9 +1260,11 @@ PUTCHAR_PROTOTYPE
 void a_buffer_write_inc()
 {
 // Set complete bits of last data point
-	a_current_data_point->complete |= (1 << A_COMPLETE_TIMESTAMP) | (flag_complete_a_mems << A_COMPLETE_MEMS) | (flag_complete_a_pz << A_COMPLETE_PZ);
+	a_current_data_point->complete |= (1 << A_COMPLETE_TIMESTAMP)
+		| (flag_complete_a_mems << A_COMPLETE_MEMS)
+		| (flag_complete_a_pz << A_COMPLETE_PZ);
 
-// TODO: can you get first sample valid?
+	// TODO: can you get first sample valid?
 	if (ticks_counter > 4)
 	{
 		Double_Buffer_Increment(&hbuffer_a);
@@ -1214,9 +1276,16 @@ void a_buffer_write_inc()
 
 void p_buffer_write_inc()
 {
-// Set complete bits of last data point
-	p_current_data_point->complete |= (1 << P_COMPLETE_TIMESTAMP) | (flag_complete_p_position << P_COMPLETE_POSITION) | (flag_complete_p_speed << P_COMPLETE_SPEED)
-		| (flag_complete_p_altitude << P_COMPLETE_ALTITUDE) | (flag_complete_p_time << P_COMPLETE_GNSS_TIME);
+	// Set complete bits of last data point
+	p_current_data_point->complete |= (1 << P_COMPLETE_TIMESTAMP)
+		| (flag_complete_p_time << P_COMPLETE_GNSS_TIME)
+		| (flag_complete_p_position << P_COMPLETE_POSITION)
+		| (flag_complete_p_speed << P_COMPLETE_SPEED)
+		| (flag_complete_p_altitude << P_COMPLETE_ALTITUDE);
+
+#if DEBUG_TEST_PRINT_P
+	Debug_test_print_p(p_current_data_point);
+#endif
 
 	Double_Buffer_Increment(&hbuffer_p);
 	p_current_data_point = ((volatile p_data_point_t*)hbuffer_p.buffer_current) + hbuffer_p.write_index;
@@ -1281,21 +1350,24 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
-	DEBUG_ADXL_PROCESS
+	if (hspi->Instance == hadxl.hspi->Instance)
+	{
+		DEBUG_ADXL_PROCESS
 
-	ADXL_Data_t adxl_data = ADXL_RxCallback(&hadxl);
-	a_current_data_point->xyz_mems1[0] = adxl_data.x;
-	a_current_data_point->xyz_mems1[1] = adxl_data.y;
-	a_current_data_point->xyz_mems1[2] = adxl_data.z;
-	a_current_data_point->temp_mems1 = adxl_data.temp;
-	flag_complete_a_mems = adxl_data.data_valid;
+		ADXL_Data_t adxl_data = ADXL_RxCallback(&hadxl);
+		a_current_data_point->xyz_mems1[0] = adxl_data.x;
+		a_current_data_point->xyz_mems1[1] = adxl_data.y;
+		a_current_data_point->xyz_mems1[2] = adxl_data.z;
+		a_current_data_point->temp_mems1 = adxl_data.temp;
+		flag_complete_a_mems = adxl_data.data_valid;
 
-	DEBUG_ADXL_PROCESS
+		DEBUG_ADXL_PROCESS
+	}
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-	if (huart->Instance == UART7)
+	if (huart->Instance == hnmea.huart->Instance)
 	{
 		DEBUG_NMEA_PROCESS
 
