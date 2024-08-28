@@ -119,6 +119,16 @@ HAL_StatusTypeDef ADXL_Init(ADXL_t *hadxl)
 		return HAL_ERROR;
 	}
 
+	// Acceleration range
+	uint8_t i2c_hs = 1; // I2C high speed
+	uint8_t int_pol = 0; // INT1, INT2 active low
+	uint8_t range = 0b11; // +-40 g acceleration range
+	if (ADXL_WriteRegisterSingle(hadxl, ADXL_REG_RANGE, (i2c_hs << 7) | (int_pol << 6) | range) != HAL_OK)
+	{
+		printf("(%lu) ERROR: ADXL_Init: Register write failed\r\n", HAL_GetTick());
+		return HAL_ERROR;
+	}
+
 	// POWER_CTL
 	// Measurement mode
 	if (ADXL_WriteRegisterSingle(hadxl, ADXL_REG_POWER_CTL, 0b00000000) != HAL_OK)

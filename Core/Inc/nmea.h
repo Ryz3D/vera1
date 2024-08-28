@@ -10,13 +10,13 @@
 #ifndef INC_NMEA_H_
 #define INC_NMEA_H_
 
-#include "config.h"
-#include "stm32f7xx_hal.h"
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+
+#include "config.h"
+#include "stm32f7xx_hal.h"
 
 #define NMEA_TALKER_GPS 'P'
 #define NMEA_TALKER_GLONASS 'L'
@@ -55,10 +55,9 @@
 #define UBX_RESET_MODE_GNSS_STOP 0x08
 #define UBX_RESET_MODE_GNSS_START 0x09
 
-#define NMEA_DATE_WAIT_DURATION 180000
-#define NMEA_RX_BUFFER_SIZE 512
-#define NMEA_DMA_BUFFER_SIZE 32
-#define NMEA_CIRCULAR_BUFFER_SIZE 128
+#define NMEA_RX_BUFFER_SIZE 128
+#define NMEA_DMA_BUFFER_SIZE 1
+#define NMEA_CIRCULAR_BUFFER_SIZE 32
 
 typedef struct
 {
@@ -87,6 +86,12 @@ typedef struct
 
 typedef struct
 {
+	uint32_t timestamp;
+	volatile char buffer[NMEA_RX_BUFFER_SIZE];
+} NMEA_Line_t;
+
+typedef struct
+{
 	UART_HandleTypeDef *huart;
 	uint32_t tx_timeout;
 	uint32_t rx_timeout;
@@ -95,10 +100,12 @@ typedef struct
 	volatile char dma_buffer[NMEA_DMA_BUFFER_SIZE];
 	volatile char rx_buffer[NMEA_RX_BUFFER_SIZE];
 	volatile uint16_t rx_buffer_write_index;
+	volatile uint8_t overflow_rx_buffer;
 	volatile char line_buffer[NMEA_RX_BUFFER_SIZE];
 	volatile uint32_t circular_read_index;
 	volatile uint32_t circular_write_index;
-	volatile char circular_buffer[NMEA_CIRCULAR_BUFFER_SIZE][NMEA_RX_BUFFER_SIZE];
+	volatile NMEA_Line_t circular_buffer[NMEA_CIRCULAR_BUFFER_SIZE];
+	volatile uint8_t overflow_circular_buffer;
 	uint16_t last_ubx_header;
 } NMEA_t;
 

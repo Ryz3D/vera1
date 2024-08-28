@@ -297,7 +297,7 @@ int main(void)
 		sd_year = gnss_data.year + 2000;
 		sd_month = gnss_data.month;
 		sd_day = gnss_data.day;
-		printf("(%lu) GNSS date: %02hu_%02u_%02u ", HAL_GetTick(), sd_year, sd_month, sd_day);
+		printf("(%lu) GNSS date: %04hu-%02u-%02u ", HAL_GetTick(), sd_year, sd_month, sd_day);
 		if (gnss_data.time_valid)
 		{
 			printf("%02u:%02u:%06.3f\r\n", gnss_data.hour, gnss_data.minute, gnss_data.second);
@@ -406,7 +406,9 @@ int main(void)
 	time_p_last = HAL_GetTick();
 	time_p_last_lock = HAL_GetTick();
 
+#if DEBUG_TEST_PRINT_NEW_PAGE
 	printf("(%lu) Page %li (\"%s\", \"%s\")\r\n", HAL_GetTick(), page_num, a_file_path, p_file_path);
+#endif
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_SET);
 	capture_running = 1;
 	/* USER CODE END 2 */

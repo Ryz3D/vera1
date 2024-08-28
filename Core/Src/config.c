@@ -9,13 +9,13 @@
 
 config_t default_config =
 	{
-		.a_sampling_rate = 4000, // 4000 (Sa/s)
-		.p_sampling_rate = 4, // 4 (Sa/s)
-		.oversampling_ratio = 4, // 4 (16 kSa/s)
-		.piezo_count = 5, // 3
-		.a_buffer_len = 4096, // 4096 (Sa)
-		.p_buffer_len = 32, // 32 (Sa)
-		.page_duration_ms = 2 * 60 * 1000 // default: 2 * 60 * 1000
+		.a_sampling_rate = 4000, // default: 4000 (Sa/s)
+		.p_sampling_rate = 2, // default: 4 (Sa/s)
+		.oversampling_ratio = 4, // default: 4 (16 kSa/s)
+		.piezo_count = 3, // default: 3
+		.a_buffer_len = 4096, // default: 4096 (Sa)
+		.p_buffer_len = 32, // default: 32 (Sa)
+		.page_duration_ms = 2 * 60 * 1000 // default: 2 * 60 * 1000 (ms) -> 2 minutes
 	};
 
 config_t config;

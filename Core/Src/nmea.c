@@ -213,7 +213,6 @@ NMEA_Data_t NMEA_GetDate(NMEA_t *hnmea)
 
 HAL_StatusTypeDef NMEA_ProcessDMABuffer(NMEA_t *hnmea)
 {
-	// UBX: read single char until header, read length
 	for (uint32_t i = 0; i < NMEA_DMA_BUFFER_SIZE; i++)
 	{
 		if (hnmea->dma_buffer[i] == '\n')
@@ -221,19 +220,29 @@ HAL_StatusTypeDef NMEA_ProcessDMABuffer(NMEA_t *hnmea)
 			if (hnmea->rx_buffer_write_index > 1)
 			{
 				// Remove \r
-				memcpy((void*)hnmea->circular_buffer[hnmea->circular_write_index], (void*)hnmea->rx_buffer, hnmea->rx_buffer_write_index - 1);
-				hnmea->circular_buffer[hnmea->circular_write_index][hnmea->rx_buffer_write_index - 1] = '\0';
+				memcpy((void*)hnmea->circular_buffer[hnmea->circular_write_index].buffer, (void*)hnmea->rx_buffer, hnmea->rx_buffer_write_index - 1);
+				hnmea->circular_buffer[hnmea->circular_write_index].buffer[hnmea->rx_buffer_write_index - 1] = '\0';
 				hnmea->circular_write_index = (hnmea->circular_write_index + 1) % NMEA_CIRCULAR_BUFFER_SIZE;
+				if (hnmea->circular_write_index == hnmea->circular_read_index)
+				{
+					hnmea->overflow_circular_buffer = 1;
+				}
 			}
 			hnmea->rx_buffer_write_index = 0;
 		}
 		else
 		{
-			if (hnmea->dma_buffer[i] == '$' || hnmea->rx_buffer_write_index == sizeof(hnmea->rx_buffer))
+			if (hnmea->dma_buffer[i] == '$')
 			{
 				hnmea->rx_buffer_write_index = 0;
+				hnmea->circular_buffer[hnmea->circular_write_index].timestamp = HAL_GetTick();
 			}
 			hnmea->rx_buffer[hnmea->rx_buffer_write_index++] = hnmea->dma_buffer[i];
+			if (hnmea->rx_buffer_write_index >= NMEA_RX_BUFFER_SIZE)
+			{
+				hnmea->rx_buffer_write_index = 0;
+				hnmea->overflow_rx_buffer = 1;
+			}
 		}
 	}
 
@@ -255,14 +264,14 @@ uint8_t NMEA_ProcessLine(NMEA_t *hnmea, NMEA_Data_t *data)
 
 	uint8_t any_valid = 0;
 
-	data->timestamp = HAL_GetTick();
+	data->timestamp = hnmea->circular_buffer[hnmea->circular_read_index].timestamp;
 	data->position_valid = 0;
 	data->speed_valid = 0;
 	data->altitude_valid = 0;
 	data->date_valid = 0;
 	data->time_valid = 0;
 
-	volatile char *line_buffer = hnmea->circular_buffer[hnmea->circular_read_index];
+	volatile char *line_buffer = hnmea->circular_buffer[hnmea->circular_read_index].buffer;
 	if (strncmp("$G", (char*)line_buffer, 2) == 0)
 	{
 		data->talker = line_buffer[2];
@@ -354,7 +363,7 @@ uint8_t NMEA_ProcessLine(NMEA_t *hnmea, NMEA_Data_t *data)
 
 uint8_t NMEA_ChecksumValid(NMEA_t *hnmea)
 {
-	volatile char *line_buffer = hnmea->circular_buffer[hnmea->circular_read_index];
+	volatile char *line_buffer = hnmea->circular_buffer[hnmea->circular_read_index].buffer;
 	uint8_t checksum_calc = 0;
 	for (uint16_t i = 1; line_buffer[i] != '\0'; i++)
 	{
@@ -411,7 +420,7 @@ char temp_buf[1000];
 void NMEA_ParsePacket(NMEA_t *hnmea, void *packet_buffer, const char format[])
 {
 	// Skip message header
-	volatile char *line_buffer = hnmea->circular_buffer[hnmea->circular_read_index];
+	volatile char *line_buffer = hnmea->circular_buffer[hnmea->circular_read_index].buffer;
 	volatile char *line_pointer = line_buffer;
 	while (*line_pointer != ',' && *line_pointer != '\0')
 	{

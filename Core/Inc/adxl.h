@@ -9,11 +9,11 @@
 
 #pragma once
 
-#include "config.h"
-#include "stm32f7xx_hal.h"
-
 #include <stdio.h>
 #include <string.h>
+
+#include "config.h"
+#include "stm32f7xx_hal.h"
 
 #define ADXL_REG_DEVID_AD 0x00
 #define ADXL_REG_DEVID_MST 0x01
