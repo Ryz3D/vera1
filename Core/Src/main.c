@@ -74,6 +74,7 @@ DMA_HandleTypeDef hdma_uart7_rx;
 DMA_HandleTypeDef hdma_usart1_rx;
 
 /* USER CODE BEGIN PV */
+Vera_SD_t hvsd1; // SD card
 ADXL_t hadxl; // MEMS sensor ADXL-357
 NMEA_t hnmea; // GNSS module Navilock 62529
 FIR_t hfir_pz[PIEZO_COUNT_MAX]; // FIR filters for ADC channels
@@ -195,6 +196,9 @@ int main(void)
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 
+	// Give some time to connect virtual COM port
+	HAL_Delay(2500);
+
 	printf("(%lu) Booting...\r\n", HAL_GetTick());
 
 	// Init SD card
@@ -204,7 +208,13 @@ int main(void)
 		HAL_Delay(100);
 		HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
 	}
-	if (SD_Init(do_format_sd) != HAL_OK)
+	hvsd1.Detect_GPIO_Port = uSD_Detect_GPIO_Port;
+	hvsd1.Detect_Pin = uSD_Detect_Pin;
+	hvsd1.fatfs = &SDFatFS;
+	hvsd1.fatfs_file = &SDFile;
+	hvsd1.fatfs_path = SDPath;
+
+	if (SD_Init(&hvsd1, do_format_sd) != HAL_OK)
 	{
 		Error_Handler();
 	}
@@ -215,11 +225,11 @@ int main(void)
 #if LOAD_CONFIG
 	// Load configuration from SD card
 	char config_buffer[500];
-	if (SD_FileExists(CONFIG_FILE_PATH))
+	if (SD_FileExists(&hvsd1, CONFIG_FILE_PATH))
 	{
 		printf("(%lu) Config found, reading...\r\n", HAL_GetTick());
 		UINT config_buffer_size = 0;
-		if (SD_ReadBuffer(CONFIG_FILE_PATH, config_buffer, sizeof(config_buffer), &config_buffer_size) != HAL_OK)
+		if (SD_ReadBuffer(&hvsd1, CONFIG_FILE_PATH, config_buffer, sizeof(config_buffer), &config_buffer_size) != HAL_OK)
 		{
 			Error_Handler();
 		}
@@ -230,11 +240,11 @@ int main(void)
 	{
 		printf("(%lu) No config found, writing default...\r\n", HAL_GetTick());
 		Config_Save(config_buffer, sizeof(config_buffer));
-		if (SD_TouchFile(CONFIG_FILE_PATH) != HAL_OK)
+		if (SD_TouchFile(&hvsd1, CONFIG_FILE_PATH) != HAL_OK)
 		{
 			Error_Handler();
 		}
-		if (SD_WriteBuffer(CONFIG_FILE_PATH, config_buffer, strlen(config_buffer)) != HAL_OK)
+		if (SD_WriteBuffer(&hvsd1, CONFIG_FILE_PATH, config_buffer, strlen(config_buffer)) != HAL_OK)
 		{
 			Error_Handler();
 		}
@@ -286,48 +296,45 @@ int main(void)
 		Error_Handler();
 	}
 
-#if DEBUG_TEST_BOOT_WITHOUT_DATE
-	sd_year = 0;
-	sd_month = 0;
-	sd_day = 0;
-#else
-	NMEA_Data_t gnss_data = NMEA_GetDate(&hnmea);
-	if (gnss_data.date_valid)
+	if (!config.boot_without_date)
 	{
-		sd_year = gnss_data.year + 2000;
-		sd_month = gnss_data.month;
-		sd_day = gnss_data.day;
-		printf("(%lu) GNSS date: %04hu-%02u-%02u ", HAL_GetTick(), sd_year, sd_month, sd_day);
-		if (gnss_data.time_valid)
+		NMEA_Data_t gnss_data = NMEA_GetDate(&hnmea);
+		if (gnss_data.date_valid)
 		{
-			printf("%02u:%02u:%06.3f\r\n", gnss_data.hour, gnss_data.minute, gnss_data.second);
+			hvsd1.date_year = gnss_data.year + 2000;
+			hvsd1.date_month = gnss_data.month;
+			hvsd1.date_day = gnss_data.day;
+			printf("(%lu) GNSS date: %04hu-%02u-%02u ", HAL_GetTick(), hvsd1.date_year, hvsd1.date_month, hvsd1.date_day);
+			if (gnss_data.time_valid)
+			{
+				printf("%02u:%02u:%06.3f\r\n", gnss_data.hour, gnss_data.minute, gnss_data.second);
+			}
+			else
+			{
+				printf("\r\n");
+			}
 		}
 		else
 		{
-			printf("\r\n");
+			printf("(%lu) WARNING: No GNSS date received, saving as %04hu_%02u_%02u\r\n", HAL_GetTick(), hvsd1.date_year, hvsd1.date_month, hvsd1.date_day);
 		}
 	}
-	else
-	{
-		printf("(%lu) WARNING: No GNSS date received, saving as %04hu_%02u_%02u\r\n", HAL_GetTick(), sd_year, sd_month, sd_day);
-	}
-#endif
 
 	// Create directory, initialize files
-	if (SD_InitDir() != HAL_OK)
+	if (SD_InitDir(&hvsd1) != HAL_OK)
 	{
 		// Try writing to different dir in case of error
-		sprintf(dir_path, DIR_FORMAT, 1, 1, 1, 1L);
-		printf("(%lu) WARNING: SD_Init_Dir failed, writing to error dir %s\r\n", HAL_GetTick(), dir_path);
+		sprintf(hvsd1.dir_path, DIR_FORMAT, 1, 1, 1, 1L);
+		printf("(%lu) WARNING: SD_Init_Dir failed, writing to error dir %s\r\n", HAL_GetTick(), hvsd1.dir_path);
 		FRESULT res;
-		if ((res = f_mkdir(dir_path)) != FR_OK)
+		if ((res = f_mkdir(hvsd1.dir_path)) != FR_OK)
 		{
-			printf("(%lu) ERROR: main: Create error dir (\"%s\") failed\r\n", HAL_GetTick(), dir_path);
+			printf("(%lu) ERROR: main: Create error dir (\"%s\") failed\r\n", HAL_GetTick(), hvsd1.dir_path);
 			Error_Handler();
 			while (1)
 				;
 		}
-		if (SD_UpdateFilepaths() != HAL_OK)
+		if (SD_UpdateFilepaths(&hvsd1) != HAL_OK)
 		{
 			printf("(%lu) ERROR: main: SD_UpdateFilepaths failed\r\n", HAL_GetTick());
 			Error_Handler();
@@ -335,7 +342,7 @@ int main(void)
 				;
 		}
 	}
-	printf("(%lu) Writing dir \"%s\"\r\n", HAL_GetTick(), dir_path);
+	printf("(%lu) Writing dir \"%s\"\r\n", HAL_GetTick(), hvsd1.dir_path);
 
 	// Init digital FIR filter
 	for (uint8_t i_ch = 0; i_ch < config.piezo_count; i_ch++)
@@ -383,22 +390,22 @@ int main(void)
 	printf("(%lu) Capture started\r\n", boot_duration);
 
 	// Write file headers
-	a_header.version = VERSION;
-	a_header.a_buffer_len = config.a_buffer_len;
-	a_header.a_sampling_rate = config.a_sampling_rate;
-	a_header.boot_duration = boot_duration;
-	a_header.fir_taps_len = FIR_TAPS_LEN;
-	a_header.oversampling_ratio = config.oversampling_ratio;
-	a_header.piezo_count_max = PIEZO_COUNT_MAX;
-	a_header.piezo_count = config.piezo_count;
-	p_header.version = VERSION;
-	p_header.p_buffer_len = config.p_buffer_len;
-	p_header.p_sampling_rate = config.p_sampling_rate;
-	p_header.boot_duration = boot_duration;
-	p_header.year = sd_year;
-	p_header.month = sd_month;
-	p_header.day = sd_day;
-	SD_NewPage(1);
+	hvsd1.a_header.version = VERSION;
+	hvsd1.a_header.a_buffer_len = config.a_buffer_len;
+	hvsd1.a_header.a_sampling_rate = config.a_sampling_rate;
+	hvsd1.a_header.boot_duration = boot_duration;
+	hvsd1.a_header.fir_taps_len = FIR_TAPS_LEN;
+	hvsd1.a_header.oversampling_ratio = config.oversampling_ratio;
+	hvsd1.a_header.piezo_count_max = PIEZO_COUNT_MAX;
+	hvsd1.a_header.piezo_count = config.piezo_count;
+	hvsd1.p_header.version = VERSION;
+	hvsd1.p_header.p_buffer_len = config.p_buffer_len;
+	hvsd1.p_header.p_sampling_rate = config.p_sampling_rate;
+	hvsd1.p_header.boot_duration = boot_duration;
+	hvsd1.p_header.year = hvsd1.date_year;
+	hvsd1.p_header.month = hvsd1.date_month;
+	hvsd1.p_header.day = hvsd1.date_day;
+	SD_NewPage(&hvsd1);
 	// Offset so page change doesn't happen simultaneously with buffer save
 	last_page_change = HAL_GetTick() - 181;
 
@@ -431,7 +438,7 @@ int main(void)
 		{
 			HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
 		}
-		else if (HAL_GetTick() - boot_duration < 2250 + dir_num * 400)
+		else if (HAL_GetTick() - boot_duration < 2250 + hvsd1.dir_num * 400)
 		{
 			HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, (HAL_GetTick() - boot_duration) % 400 < 200);
 		}
@@ -440,13 +447,14 @@ int main(void)
 		if (hbuffer_a.flag_save_buffer_1)
 		{
 			DEBUG_A_BUFFER_1_SD
-			if (SD_WriteBuffer(a_file_path, (void*)a_buffer_1, config.a_buffer_len * sizeof(a_data_point_t)) != HAL_OK)
+			if (SD_WriteBuffer(&hvsd1, hvsd1.a_file_path, (void*)a_buffer_1, config.a_buffer_len * sizeof(a_data_point_t)) != HAL_OK)
 			{
 				Error_Handler();
 			}
-#if DEBUG_TEST_PRINT_A
-			Debug_test_print_a(a_buffer_1);
-#endif
+			if (config.print_acceleration_data)
+			{
+				Debug_test_print_a(a_buffer_1);
+			}
 			// Flag a_buffer_1 as saved
 			hbuffer_a.flag_save_buffer_1 = 0;
 			DEBUG_A_BUFFER_1_SD
@@ -455,13 +463,14 @@ int main(void)
 		if (hbuffer_a.flag_save_buffer_2)
 		{
 			DEBUG_A_BUFFER_2_SD
-			if (SD_WriteBuffer(a_file_path, (void*)a_buffer_2, config.a_buffer_len * sizeof(a_data_point_t)) != HAL_OK)
+			if (SD_WriteBuffer(&hvsd1, hvsd1.a_file_path, (void*)a_buffer_2, config.a_buffer_len * sizeof(a_data_point_t)) != HAL_OK)
 			{
 				Error_Handler();
 			}
-#if DEBUG_TEST_PRINT_A
-			Debug_test_print_a(a_buffer_2);
-#endif
+			if (config.print_acceleration_data)
+			{
+				Debug_test_print_a(a_buffer_2);
+			}
 			// Flag a_buffer_2 as saved
 			hbuffer_a.flag_save_buffer_2 = 0;
 			DEBUG_A_BUFFER_2_SD
@@ -476,7 +485,7 @@ int main(void)
 		if (hbuffer_p.flag_save_buffer_1)
 		{
 			DEBUG_P_BUFFER_1_SD
-			if (SD_WriteBuffer(p_file_path, (void*)p_buffer_1, config.p_buffer_len * sizeof(p_data_point_t)) != HAL_OK)
+			if (SD_WriteBuffer(&hvsd1, hvsd1.p_file_path, (void*)p_buffer_1, config.p_buffer_len * sizeof(p_data_point_t)) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -488,7 +497,7 @@ int main(void)
 		if (hbuffer_p.flag_save_buffer_2)
 		{
 			DEBUG_P_BUFFER_2_SD
-			if (SD_WriteBuffer(p_file_path, (void*)p_buffer_2, config.p_buffer_len * sizeof(p_data_point_t)) != HAL_OK)
+			if (SD_WriteBuffer(&hvsd1, hvsd1.p_file_path, (void*)p_buffer_2, config.p_buffer_len * sizeof(p_data_point_t)) != HAL_OK)
 			{
 				Error_Handler();
 			}
@@ -570,13 +579,13 @@ int main(void)
 
 		if (HAL_GetTick() - last_page_change > config.page_duration_ms)
 		{
-			SD_NewPage(0);
+			SD_NewPage(&hvsd1);
 #if DEBUG_TEST_PRINT_NEW_PAGE
 			printf("(%lu) Page %li (\"%s\", \"%s\")\r\n", HAL_GetTick(), page_num, a_file_path, p_file_path);
 #endif
 			last_page_change = HAL_GetTick();
 		}
-		if (SD_FlushLog() != HAL_OK)
+		if (SD_FlushLog(&hvsd1) != HAL_OK)
 		{
 			HAL_UART_Transmit(&huart3, (const uint8_t*)str_sd_log_error, strlen(str_sd_log_error), 1000);
 		}
@@ -593,25 +602,25 @@ int main(void)
 	HAL_TIM_Base_Stop_IT(&htim2);
 	HAL_ADC_Stop_IT(&hadc1);
 
-// Save remaining data
-	if (SD_WriteBuffer(a_file_path, (void*)hbuffer_a.buffer_current, hbuffer_a.write_index * sizeof(a_data_point_t)) != HAL_OK)
+	// Save remaining data
+	if (SD_WriteBuffer(&hvsd1, hvsd1.a_file_path, (void*)hbuffer_a.buffer_current, hbuffer_a.write_index * sizeof(a_data_point_t)) != HAL_OK)
 	{
 		Error_Handler();
 	}
-	if (SD_WriteBuffer(p_file_path, (void*)hbuffer_p.buffer_current, hbuffer_p.write_index * sizeof(p_data_point_t)) != HAL_OK)
+	if (SD_WriteBuffer(&hvsd1, hvsd1.p_file_path, (void*)hbuffer_p.buffer_current, hbuffer_p.write_index * sizeof(p_data_point_t)) != HAL_OK)
 	{
 		Error_Handler();
 	}
 
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
-	printf("(%lu) Capture stopped (\"%s\")\r\n", HAL_GetTick(), dir_path);
+	printf("(%lu) Capture stopped (\"%s\")\r\n", HAL_GetTick(), hvsd1.dir_path);
 
-	if (SD_FlushLog() != HAL_OK)
+	if (SD_FlushLog(&hvsd1) != HAL_OK)
 	{
 		HAL_UART_Transmit(&huart3, (const uint8_t*)str_sd_log_error, strlen(str_sd_log_error), 1000);
 	}
 
-	SD_Uninit();
+	SD_Uninit(&hvsd1);
 
 	while (1)
 		;
@@ -1240,9 +1249,9 @@ static void MX_GPIO_Init(void)
  */
 PUTCHAR_PROTOTYPE
 {
-	if (sd_log_write_index < SD_LOG_LEN)
+	if (hvsd1.sd_log_write_index < SD_LOG_LEN)
 	{
-		sd_log[sd_log_write_index++] = (char)ch;
+		hvsd1.sd_log[hvsd1.sd_log_write_index++] = (char)ch;
 	}
 
 	cdc_buf[cdc_buf_i++] = ch;
@@ -1285,9 +1294,10 @@ void p_buffer_write_inc()
 		| (flag_complete_p_speed << P_COMPLETE_SPEED)
 		| (flag_complete_p_altitude << P_COMPLETE_ALTITUDE);
 
-#if DEBUG_TEST_PRINT_P
-	Debug_test_print_p(p_current_data_point);
-#endif
+	if (config.print_position_data)
+	{
+		Debug_test_print_p(p_current_data_point);
+	}
 
 	Double_Buffer_Increment(&hbuffer_p);
 	p_current_data_point = ((volatile p_data_point_t*)hbuffer_p.buffer_current) + hbuffer_p.write_index;

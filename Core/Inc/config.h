@@ -26,6 +26,9 @@
 #define NMEA_PACKET_MERGE_DURATION 25
 #define NMEA_NO_PACKET_DURATION 5000
 
+#define C_F_BOOT_WITHOUT_DATE "boot_without_date=%hhu"
+#define C_F_PRINT_ACCELERATION_DATA "print_acceleration_data=%hhu"
+#define C_F_PRINT_POSITION_DATA "print_position_data=%hhu"
 #define C_F_A_SAMPLING_RATE "a_sampling_rate=%lu"
 #define C_F_P_SAMPLING_RATE "p_sampling_rate=%lu"
 #define C_F_OVERSAMPLING_RATIO "oversampling_ratio=%hhu"
@@ -36,6 +39,12 @@
 
 typedef struct
 {
+	// Skip waiting for date from GNSS module, start capture immediately (in directory "0000-00-00")
+	uint8_t boot_without_date;
+	// Print live acceleration as amplitude and offset
+	uint8_t print_acceleration_data;
+	// Print live position, speed, altitude, GNSS time
+	uint8_t print_position_data;
 	// Rate of saved acceleration samples
 	uint32_t a_sampling_rate;
 	// Rate of saved position samples
@@ -81,11 +90,8 @@ extern config_t default_config, config;
 #define DEBUG_TEST_PRINT_CONFIG 1
 #define DEBUG_TEST_ALWAYS_FORMAT_SD 0
 #define DEBUG_TEST_NEVER_FORMAT_SD 0
-#define DEBUG_TEST_BOOT_WITHOUT_DATE 0
 #define DEBUG_TEST_FIR_FREQUENCY_SWEEP 0
 #define DEBUG_TEST_FIR_DAC 0
-#define DEBUG_TEST_PRINT_A 0
-#define DEBUG_TEST_PRINT_P 0
 #define DEBUG_TEST_PRINT_NO_LOCATION 1
 #define DEBUG_TEST_PRINT_NEW_PAGE 0
 

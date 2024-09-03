@@ -9,6 +9,9 @@
 
 config_t default_config =
 	{
+		.boot_without_date = 0, // default: 0
+		.print_acceleration_data = 0, // default: 0
+		.print_position_data = 0, // default: 0
 		.a_sampling_rate = 4000, // default: 4000 (Sa/s)
 		.p_sampling_rate = 2, // default: 4 (Sa/s)
 		.oversampling_ratio = 4, // default: 4 (16 kSa/s)
@@ -56,6 +59,10 @@ void Config_Load(char *buffer, uint32_t size)
 			continue;
 
 		int n = 0;
+		// C_READ_VAR(C_F_, config.);
+		C_READ_VAR(C_F_BOOT_WITHOUT_DATE, config.boot_without_date);
+		C_READ_VAR(C_F_PRINT_ACCELERATION_DATA, config.print_acceleration_data);
+		C_READ_VAR(C_F_PRINT_POSITION_DATA, config.print_position_data);
 		C_READ_VAR(C_F_A_SAMPLING_RATE, config.a_sampling_rate);
 		C_READ_VAR(C_F_P_SAMPLING_RATE, config.p_sampling_rate);
 		C_READ_VAR(C_F_OVERSAMPLING_RATIO, config.oversampling_ratio);
@@ -65,6 +72,10 @@ void Config_Load(char *buffer, uint32_t size)
 		C_READ_VAR(C_F_PAGE_DURATION_MS, config.page_duration_ms);
 	}
 
+	// C_CHECK_VAR(C_F_, config., 0, 1);
+	C_CHECK_VAR(C_F_BOOT_WITHOUT_DATE, config.boot_without_date, 0, 1);
+	C_CHECK_VAR(C_F_PRINT_ACCELERATION_DATA, config.print_acceleration_data, 0, 1);
+	C_CHECK_VAR(C_F_PRINT_POSITION_DATA, config.print_position_data, 0, 1);
 	C_CHECK_VAR(C_F_A_SAMPLING_RATE, config.a_sampling_rate, 1, 100000);
 	C_CHECK_VAR(C_F_P_SAMPLING_RATE, config.p_sampling_rate, 1, 30);
 	C_CHECK_VAR(C_F_OVERSAMPLING_RATIO, config.oversampling_ratio, 1, OVERSAMPLING_RATIO_MAX);
@@ -77,6 +88,10 @@ void Config_Load(char *buffer, uint32_t size)
 void Config_Save(char *buffer, uint32_t size)
 {
 	uint32_t i = 0;
+	// C_WRITE_VAR(C_F_, config.);
+	C_WRITE_VAR(C_F_BOOT_WITHOUT_DATE, config.boot_without_date);
+	C_WRITE_VAR(C_F_PRINT_ACCELERATION_DATA, config.print_acceleration_data);
+	C_WRITE_VAR(C_F_PRINT_POSITION_DATA, config.print_position_data);
 	C_WRITE_VAR(C_F_A_SAMPLING_RATE, config.a_sampling_rate);
 	C_WRITE_VAR(C_F_P_SAMPLING_RATE, config.p_sampling_rate);
 	C_WRITE_VAR(C_F_OVERSAMPLING_RATIO, config.oversampling_ratio);

@@ -16,6 +16,9 @@ void Debug_test_print_config()
 	printf("    PIEZO_COUNT_MAX=%u\r\n", PIEZO_COUNT_MAX);
 	printf("    A_BUFFER_LEN_MAX=%u\r\n", A_BUFFER_LEN_MAX);
 	printf("    P_BUFFER_LEN_MAX=%u\r\n", P_BUFFER_LEN_MAX);
+	printf("    NMEA_DATE_WAIT_DURATION=%u\r\n", NMEA_DATE_WAIT_DURATION);
+	printf("    NMEA_PACKET_MERGE_DURATION=%u\r\n", NMEA_PACKET_MERGE_DURATION);
+	printf("    NMEA_NO_PACKET_DURATION=%u\r\n", NMEA_NO_PACKET_DURATION);
 	char config_buffer[500];
 	Config_Save(config_buffer, sizeof(config_buffer));
 	printf("(%lu) Loaded Config:\r\n    ", HAL_GetTick());
