@@ -12,13 +12,15 @@ config_t default_config =
 		.boot_without_date = 0, // default: 0
 		.print_acceleration_data = 0, // default: 0
 		.print_position_data = 0, // default: 0
+		.piezo_count = 3, // default: 3
+		.fir_type = 1, // default: 1
+		.adxl_range = 40, // default: 40 (g)
+		.page_duration_ms = 2 * 60 * 1000, // default: 2 * 60 * 1000 (ms) -> 2 minutes
 		.a_sampling_rate = 4000, // default: 4000 (Sa/s)
 		.p_sampling_rate = 2, // default: 4 (Sa/s)
 		.oversampling_ratio = 4, // default: 4 (16 kSa/s)
-		.piezo_count = 3, // default: 3
 		.a_buffer_len = 4096, // default: 4096 (Sa)
 		.p_buffer_len = 32, // default: 32 (Sa)
-		.page_duration_ms = 2 * 60 * 1000 // default: 2 * 60 * 1000 (ms) -> 2 minutes
 	};
 
 config_t config;
@@ -63,26 +65,30 @@ void Config_Load(char *buffer, uint32_t size)
 		C_READ_VAR(C_F_BOOT_WITHOUT_DATE, config.boot_without_date);
 		C_READ_VAR(C_F_PRINT_ACCELERATION_DATA, config.print_acceleration_data);
 		C_READ_VAR(C_F_PRINT_POSITION_DATA, config.print_position_data);
+		C_READ_VAR(C_F_PIEZO_COUNT, config.piezo_count);
+		C_READ_VAR(C_F_FIR_TYPE, config.fir_type);
+		C_READ_VAR(C_F_ADXL_RANGE, config.adxl_range);
+		C_READ_VAR(C_F_PAGE_DURATION_MS, config.page_duration_ms);
 		C_READ_VAR(C_F_A_SAMPLING_RATE, config.a_sampling_rate);
 		C_READ_VAR(C_F_P_SAMPLING_RATE, config.p_sampling_rate);
 		C_READ_VAR(C_F_OVERSAMPLING_RATIO, config.oversampling_ratio);
-		C_READ_VAR(C_F_PIEZO_COUNT, config.piezo_count);
 		C_READ_VAR(C_F_A_BUFFER_LEN, config.a_buffer_len);
 		C_READ_VAR(C_F_P_BUFFER_LEN, config.p_buffer_len);
-		C_READ_VAR(C_F_PAGE_DURATION_MS, config.page_duration_ms);
 	}
 
 	// C_CHECK_VAR(C_F_, config., 0, 1);
 	C_CHECK_VAR(C_F_BOOT_WITHOUT_DATE, config.boot_without_date, 0, 1);
 	C_CHECK_VAR(C_F_PRINT_ACCELERATION_DATA, config.print_acceleration_data, 0, 1);
 	C_CHECK_VAR(C_F_PRINT_POSITION_DATA, config.print_position_data, 0, 1);
+	C_CHECK_VAR(C_F_PIEZO_COUNT, config.piezo_count, 1, PIEZO_COUNT_MAX);
+	C_CHECK_VAR(C_F_FIR_TYPE, config.fir_type, 0, 7);
+	C_CHECK_VAR(C_F_ADXL_RANGE, config.adxl_range, 10, 40);
+	C_CHECK_VAR(C_F_PAGE_DURATION_MS, config.page_duration_ms, 1, 100000000);
 	C_CHECK_VAR(C_F_A_SAMPLING_RATE, config.a_sampling_rate, 1, 100000);
 	C_CHECK_VAR(C_F_P_SAMPLING_RATE, config.p_sampling_rate, 1, 30);
 	C_CHECK_VAR(C_F_OVERSAMPLING_RATIO, config.oversampling_ratio, 1, OVERSAMPLING_RATIO_MAX);
-	C_CHECK_VAR(C_F_PIEZO_COUNT, config.piezo_count, 1, PIEZO_COUNT_MAX);
 	C_CHECK_VAR(C_F_A_BUFFER_LEN, config.a_buffer_len, 1, A_BUFFER_LEN_MAX);
 	C_CHECK_VAR(C_F_P_BUFFER_LEN, config.p_buffer_len, 1, P_BUFFER_LEN_MAX);
-	C_CHECK_VAR(C_F_PAGE_DURATION_MS, config.page_duration_ms, 1, 100000000);
 }
 
 void Config_Save(char *buffer, uint32_t size)
@@ -92,13 +98,15 @@ void Config_Save(char *buffer, uint32_t size)
 	C_WRITE_VAR(C_F_BOOT_WITHOUT_DATE, config.boot_without_date);
 	C_WRITE_VAR(C_F_PRINT_ACCELERATION_DATA, config.print_acceleration_data);
 	C_WRITE_VAR(C_F_PRINT_POSITION_DATA, config.print_position_data);
+	C_WRITE_VAR(C_F_PIEZO_COUNT, config.piezo_count);
+	C_WRITE_VAR(C_F_FIR_TYPE, config.fir_type);
+	C_WRITE_VAR(C_F_ADXL_RANGE, config.adxl_range);
+	C_WRITE_VAR(C_F_PAGE_DURATION_MS, config.page_duration_ms);
 	C_WRITE_VAR(C_F_A_SAMPLING_RATE, config.a_sampling_rate);
 	C_WRITE_VAR(C_F_P_SAMPLING_RATE, config.p_sampling_rate);
 	C_WRITE_VAR(C_F_OVERSAMPLING_RATIO, config.oversampling_ratio);
-	C_WRITE_VAR(C_F_PIEZO_COUNT, config.piezo_count);
 	C_WRITE_VAR(C_F_A_BUFFER_LEN, config.a_buffer_len);
 	C_WRITE_VAR(C_F_P_BUFFER_LEN, config.p_buffer_len);
-	C_WRITE_VAR(C_F_PAGE_DURATION_MS, config.page_duration_ms);
 }
 
 HAL_StatusTypeDef Config_Init(ADC_HandleTypeDef *hadc1, TIM_HandleTypeDef *htim2, TIM_HandleTypeDef *htim3)

@@ -112,7 +112,19 @@ HAL_StatusTypeDef ADXL_Init(ADXL_t *hadxl)
 
 	// Filter
 	uint8_t hpf = 0b000; // HPF off
-	uint8_t lpf = 0b0000; // ODR 4000 Hz LPF 1000 Hz (maximum)
+	// Get ratio of set sampling rate to max sampling rate
+	uint16_t sampling_rate_ratio = 4000 / hadxl->sampling_rate;
+	// log2 to get register setting
+	uint8_t lpf = 0;
+	while (sampling_rate_ratio >>= 1)
+	{
+		lpf++;
+	}
+	if (lpf > 10)
+	{
+		lpf = 0;
+		printf("(%lu) WARNING: ADXL_Init: Invalid sampling_rate %hu, using 4kHz\r\n", HAL_GetTick(), hadxl->sampling_rate);
+	}
 	if (ADXL_WriteRegisterSingle(hadxl, ADXL_REG_FILTER, (hpf << 4) | lpf) != HAL_OK)
 	{
 		printf("(%lu) ERROR: ADXL_Init: Register write failed\r\n", HAL_GetTick());
@@ -122,7 +134,19 @@ HAL_StatusTypeDef ADXL_Init(ADXL_t *hadxl)
 	// Acceleration range
 	uint8_t i2c_hs = 1; // I2C high speed
 	uint8_t int_pol = 0; // INT1, INT2 active low
-	uint8_t range = 0b11; // +-40 g acceleration range
+	// Get ratio of set range to min range
+	uint16_t range_ratio = hadxl->acceleration_range / 10;
+	// log2 to get register setting
+	uint8_t range = 1;
+	while (range_ratio >>= 1)
+	{
+		range++;
+	}
+	if (range == 0 || range > 3)
+	{
+		range = 0;
+		printf("(%lu) WARNING: ADXL_Init: Invalid range %hu, using +-40g\r\n", HAL_GetTick(), hadxl->acceleration_range);
+	}
 	if (ADXL_WriteRegisterSingle(hadxl, ADXL_REG_RANGE, (i2c_hs << 7) | (int_pol << 6) | range) != HAL_OK)
 	{
 		printf("(%lu) ERROR: ADXL_Init: Register write failed\r\n", HAL_GetTick());

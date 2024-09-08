@@ -32,7 +32,7 @@
 #include "adxl.h"
 #include "nmea.h"
 #include "fir.h"
-#include "fir_taps7.h"
+#include "fir_taps.h"
 #include "double_buffering.h"
 /* USER CODE END Includes */
 
@@ -196,18 +196,19 @@ int main(void)
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(LD3_GPIO_Port, LD3_Pin, GPIO_PIN_RESET);
 
-	// Give some time to connect virtual COM port
-	HAL_Delay(2500);
-
-	printf("(%lu) Booting...\r\n", HAL_GetTick());
-
-	// Init SD card
 	if (do_format_sd)
 	{
 		HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
 		HAL_Delay(100);
 		HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
 	}
+
+	// Give some time to connect virtual COM port
+	HAL_Delay(2500);
+
+	printf("(%lu) Booting...\r\n", HAL_GetTick());
+
+	// Init SD card
 	hvsd1.Detect_GPIO_Port = uSD_Detect_GPIO_Port;
 	hvsd1.Detect_Pin = uSD_Detect_Pin;
 	hvsd1.fatfs = &SDFatFS;
@@ -277,6 +278,8 @@ int main(void)
 
 	// Initialize ADXL357
 	hadxl.hspi = &ADXL_SPI;
+	hadxl.sampling_rate = config.a_sampling_rate;
+	hadxl.acceleration_range = config.adxl_range;
 	hadxl.timeout = 100;
 	hadxl.CS_GPIO_Port = ADXL_CS_GPIO_Port;
 	hadxl.CS_Pin = ADXL_CS_Pin;
@@ -345,9 +348,14 @@ int main(void)
 	printf("(%lu) Writing dir \"%s\"\r\n", HAL_GetTick(), hvsd1.dir_path);
 
 	// Init digital FIR filter
-	for (uint8_t i_ch = 0; i_ch < config.piezo_count; i_ch++)
+	if (config.fir_type > 0)
 	{
-		FIR_Init(&hfir_pz[i_ch], fir_taps);
+		for (uint8_t i_ch = 0; i_ch < config.piezo_count; i_ch++)
+		{
+			memcpy(hfir_pz[i_ch].Taps, fir_taps_types[config.fir_type], fir_taps_lens[config.fir_type] / sizeof(q15_t));
+			hfir_pz[i_ch].Nt = fir_taps_lens[config.fir_type];
+			FIR_Init(&hfir_pz[i_ch]);
+		}
 	}
 
 	a_buffer_1[0].timestamp = 0;
@@ -394,7 +402,7 @@ int main(void)
 	hvsd1.a_header.a_buffer_len = config.a_buffer_len;
 	hvsd1.a_header.a_sampling_rate = config.a_sampling_rate;
 	hvsd1.a_header.boot_duration = boot_duration;
-	hvsd1.a_header.fir_taps_len = FIR_TAPS_LEN;
+	hvsd1.a_header.fir_taps_len = fir_taps_lens[config.fir_type];
 	hvsd1.a_header.oversampling_ratio = config.oversampling_ratio;
 	hvsd1.a_header.piezo_count_max = PIEZO_COUNT_MAX;
 	hvsd1.a_header.piezo_count = config.piezo_count;
@@ -523,6 +531,12 @@ int main(void)
 				flag_complete_p_position = 1;
 				p_current_data_point->lat = data.lat;
 				p_current_data_point->lon = data.lon;
+
+				// Activate GNSS lock LED
+				if (HAL_GetTick() - boot_duration > 4000 + hvsd1.dir_num * 400)
+				{
+					HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_SET);
+				}
 			}
 			if (data.speed_valid)
 			{
@@ -568,14 +582,17 @@ int main(void)
 			printf("(%lu) WARNING: No NMEA data\r\n", HAL_GetTick());
 			time_p_last = 0;
 		}
-#if DEBUG_TEST_PRINT_NO_LOCATION
 		// Warning if no position lock
 		if (HAL_GetTick() - time_p_last_lock > NMEA_NO_PACKET_DURATION && time_p_last_lock != 0)
 		{
 			printf("(%lu) WARNING: No position lock\r\n", HAL_GetTick());
+			// Deactivate GNSS lock LED
+			if (HAL_GetTick() - boot_duration > 4000 + hvsd1.dir_num * 400)
+			{
+				HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
+			}
 			time_p_last_lock = 0;
 		}
-#endif
 
 		if (HAL_GetTick() - last_page_change > config.page_duration_ms)
 		{
@@ -612,7 +629,9 @@ int main(void)
 		Error_Handler();
 	}
 
+	HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
 	HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+
 	printf("(%lu) Capture stopped (\"%s\")\r\n", HAL_GetTick(), hvsd1.dir_path);
 
 	if (SD_FlushLog(&hvsd1) != HAL_OK)
@@ -1270,13 +1289,12 @@ PUTCHAR_PROTOTYPE
 
 void a_buffer_write_inc()
 {
-// Set complete bits of last data point
+	// Set complete bits of last data point
 	a_current_data_point->complete |= (1 << A_COMPLETE_TIMESTAMP)
 		| (flag_complete_a_mems << A_COMPLETE_MEMS)
 		| (flag_complete_a_pz << A_COMPLETE_PZ);
 
-	// TODO: can you get first sample valid?
-	if (ticks_counter > 4)
+	if (ticks_counter > 1)
 	{
 		Double_Buffer_Increment(&hbuffer_a);
 		a_current_data_point = ((volatile a_data_point_t*)hbuffer_a.buffer_current) + hbuffer_a.write_index;
@@ -1315,13 +1333,13 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 		{
 			// Increment data point index
 			a_buffer_write_inc();
-		}
-		ticks_counter++;
+			ticks_counter++;
 
-		// Request MEMS data packet
-		if (ADXL_RequestData(&hadxl) == HAL_ERROR)
-		{
-			printf("(%lu) WARNING: ADXL_RequestData: TxRx failed\r\n", HAL_GetTick());
+			// Request MEMS data packet
+			if (ADXL_RequestData(&hadxl) == HAL_ERROR)
+			{
+				printf("(%lu) WARNING: ADXL_RequestData: TxRx failed\r\n", HAL_GetTick());
+			}
 		}
 
 		DEBUG_A_TIMER
@@ -1346,8 +1364,15 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 			}
 			for (uint8_t i_ch = 0; i_ch < config.piezo_count; i_ch++)
 			{
-				FIR_Update(&hfir_pz[i_ch]);
-				a_current_data_point->a_piezo[i_ch] = hfir_pz[i_ch].Out[0];
+				if (config.fir_type > 0)
+				{
+					FIR_Update(&hfir_pz[i_ch]);
+					a_current_data_point->a_piezo[i_ch] = hfir_pz[i_ch].Out[0];
+				}
+				else
+				{
+					a_current_data_point->a_piezo[i_ch] = hfir_pz[i_ch].In[0];
+				}
 			}
 			flag_complete_a_pz = 1;
 

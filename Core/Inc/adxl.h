@@ -68,6 +68,8 @@ typedef struct
 	ADXL_State_t state;
 	SPI_HandleTypeDef *hspi;
 	uint32_t timeout;
+	uint16_t sampling_rate; // IMPORTANT: Provide sampling rate as truncated (rounded-down) given in datasheet S. 48
+	uint16_t acceleration_range;
 	GPIO_TypeDef *CS_GPIO_Port;
 	uint16_t CS_Pin;
 	volatile uint8_t identification[3];

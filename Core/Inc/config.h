@@ -29,13 +29,15 @@
 #define C_F_BOOT_WITHOUT_DATE "boot_without_date=%hhu"
 #define C_F_PRINT_ACCELERATION_DATA "print_acceleration_data=%hhu"
 #define C_F_PRINT_POSITION_DATA "print_position_data=%hhu"
+#define C_F_PIEZO_COUNT "piezo_count=%hhu"
+#define C_F_FIR_TYPE "fir_type=%hhu"
+#define C_F_ADXL_RANGE "adxl_range=%hu"
+#define C_F_PAGE_DURATION_MS "page_duration_ms=%lu"
 #define C_F_A_SAMPLING_RATE "a_sampling_rate=%lu"
 #define C_F_P_SAMPLING_RATE "p_sampling_rate=%lu"
 #define C_F_OVERSAMPLING_RATIO "oversampling_ratio=%hhu"
-#define C_F_PIEZO_COUNT "piezo_count=%hhu"
 #define C_F_A_BUFFER_LEN "a_buffer_len=%lu"
 #define C_F_P_BUFFER_LEN "p_buffer_len=%lu"
-#define C_F_PAGE_DURATION_MS "page_duration_ms=%lu"
 
 typedef struct
 {
@@ -45,21 +47,25 @@ typedef struct
 	uint8_t print_acceleration_data;
 	// Print live position, speed, altitude, GNSS time
 	uint8_t print_position_data;
+	// Number of ADC channels
+	uint8_t piezo_count;
+	// Select FIR taps (0: disable)
+	uint8_t fir_type;
+	// ADXL357 measurement range
+	uint16_t adxl_range;
+	// Duration before switching to next page (file) in milliseconds
+	uint32_t page_duration_ms;
 	// Rate of saved acceleration samples
 	uint32_t a_sampling_rate;
 	// Rate of saved position samples
 	uint32_t p_sampling_rate;
 	// ADC sampling rate = a_sampling_rate * oversampling_ratio
 	uint8_t oversampling_ratio;
-	// Number of ADC channels
-	uint8_t piezo_count;
 	// Length of acceleration data point buffer (write to SD-card every (4096 Sa) / (4 kSa/s) = 1.024 s)
-	// This option can have a huge impact on RAM usage, it can be reduced if the main function has enough time to save the buffer before the next interrupt
+	// This option can have a huge impact on RAM usage, it can be reduced if the main function has enough time to save one buffer before the other is filled
 	uint32_t a_buffer_len;
 	// Length of position data point buffer (write to SD-card every (128 Sa) / (40 Sa/s) = 3.2 s)
 	uint32_t p_buffer_len;
-	// Duration before switching to next page (file) in milliseconds
-	uint32_t page_duration_ms;
 } config_t;
 
 extern config_t default_config, config;
@@ -92,7 +98,6 @@ extern config_t default_config, config;
 #define DEBUG_TEST_NEVER_FORMAT_SD 0
 #define DEBUG_TEST_FIR_FREQUENCY_SWEEP 0
 #define DEBUG_TEST_FIR_DAC 0
-#define DEBUG_TEST_PRINT_NO_LOCATION 1
 #define DEBUG_TEST_PRINT_NEW_PAGE 0
 
 void Config_Default(void);
