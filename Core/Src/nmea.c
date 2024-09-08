@@ -307,7 +307,7 @@ uint8_t NMEA_ProcessLine(NMEA_t *hnmea, NMEA_Data_t *data)
 				data->speed_kmh = packet.speed_kn * 1.852f;
 			}
 		}
-		if (strncmp("GGA", (char*)line_buffer + 3, 3) == 0)
+		else if (strncmp("GGA", (char*)line_buffer + 3, 3) == 0)
 		{
 			if (!NMEA_ChecksumValid(hnmea))
 			{
@@ -324,37 +324,6 @@ uint8_t NMEA_ProcessLine(NMEA_t *hnmea, NMEA_Data_t *data)
 				data->altitude = packet.altitude;
 			}
 		}
-		/*
-		 if (strncmp("GLL", (char*)line_buffer + 3, 3) == 0)
-		 {
-		 NMEA_Packet_GLL_t packet;
-		 NMEA_ParsePacket(hnmea, &packet, nmea_pformat_gll);
-
-		 if (packet.time > 0)
-		 {
-		 data->time_valid = 1;
-		 NMEA_ConvertTime(data, packet.time);
-		 }
-		 if (packet.mode != NMEA_MODE_NOT_VALID)
-		 {
-		 data->pos_valid = 1;
-		 NMEA_ConvertLatLon(data, packet.lat, packet.lat_dir, packet.lon, packet.lon_dir);
-		 }
-		 }
-		 */
-		/*
-		 if (strncmp("VTG", (char*)line_buffer + 3, 3) == 0)
-		 {
-		 NMEA_Packet_VTG_t packet;
-		 NMEA_ParsePacket(hnmea, &packet, nmea_pformat_vtg);
-
-		 if (packet.mode != NMEA_MODE_NOT_VALID)
-		 {
-		 data->speed_valid = 1;
-		 data->speed_kmh = packet.speed_kmh;
-		 }
-		 }
-		 */
 	}
 	hnmea->circular_read_index = (hnmea->circular_read_index + 1) % NMEA_CIRCULAR_BUFFER_SIZE;
 
@@ -446,14 +415,14 @@ void NMEA_ParsePacket(NMEA_t *hnmea, void *packet_buffer, const char format[])
 				buffer_pointer += sizeof(int32_t) - (uintptr_t)buffer_pointer % sizeof(int32_t);
 			}
 			// Check if value is present
-			if (*line_pointer == ',')
-			{
-				*(int32_t*)buffer_pointer = 0;
-			}
-			else
+			if (*line_pointer != ',')
 			{
 				*(int32_t*)buffer_pointer = strtol((char*)line_pointer, &end_pointer, 10);
 				line_pointer = end_pointer;
+			}
+			else
+			{
+				*(int32_t*)buffer_pointer = 0;
 			}
 			line_pointer++;
 			buffer_pointer += sizeof(int32_t);
@@ -463,14 +432,14 @@ void NMEA_ParsePacket(NMEA_t *hnmea, void *packet_buffer, const char format[])
 			{
 				buffer_pointer += sizeof(int32_t) - (uintptr_t)buffer_pointer % sizeof(int32_t);
 			}
-			if (*line_pointer == ',')
-			{
-				*(int32_t*)buffer_pointer = 0;
-			}
-			else
+			if (*line_pointer != ',')
 			{
 				*(int32_t*)buffer_pointer = strtol((char*)line_pointer, &end_pointer, 16);
 				line_pointer = end_pointer;
+			}
+			else
+			{
+				*(int32_t*)buffer_pointer = 0;
 			}
 			line_pointer++;
 			buffer_pointer += sizeof(int32_t);
@@ -482,27 +451,27 @@ void NMEA_ParsePacket(NMEA_t *hnmea, void *packet_buffer, const char format[])
 				// https://stackoverflow.com/questions/4840410/how-to-align-a-pointer-in-c
 				// buffer_pointer = (~(uintptr_t)buffer_pointer + 1) & (sizeof(float) - 1);
 			}
-			if (*line_pointer == ',')
-			{
-				*(float*)buffer_pointer = 0;
-			}
-			else
+			if (*line_pointer != ',')
 			{
 				*(float*)buffer_pointer = strtof((char*)line_pointer, &end_pointer);
 				line_pointer = end_pointer;
+			}
+			else
+			{
+				*(float*)buffer_pointer = 0;
 			}
 			line_pointer++;
 			buffer_pointer += sizeof(float);
 			break;
 		case 'c':
-			if (*line_pointer == ',')
-			{
-				*(char*)buffer_pointer = '\0';
-			}
-			else
+			if (*line_pointer != ',')
 			{
 				*(char*)buffer_pointer = *line_pointer;
 				line_pointer++;
+			}
+			else
+			{
+				*(char*)buffer_pointer = '\0';
 			}
 			line_pointer++;
 			buffer_pointer += sizeof(char);

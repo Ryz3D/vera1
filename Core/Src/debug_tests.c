@@ -7,6 +7,15 @@
 
 #include "debug_tests.h"
 
+void Debug_test_fast_boot(ADC_HandleTypeDef *hadc1, TIM_HandleTypeDef *htim2, TIM_HandleTypeDef *htim3, uint16_t *pz_dma_buffer)
+{
+	Config_Default();
+	Config_Init(hadc1, htim2, htim3);
+	HAL_ADC_Start_DMA(hadc1, (uint32_t*)pz_dma_buffer, 9);
+	HAL_TIM_Base_Start_IT(htim2);
+	HAL_TIM_Base_Start_IT(htim3);
+}
+
 void Debug_test_print_config()
 {
 	printf("(%lu) Compiled Config:\r\n", HAL_GetTick());

@@ -14,6 +14,7 @@
 #include "fir.h"
 #include "data_points.h"
 
+void Debug_test_fast_boot(ADC_HandleTypeDef *hadc1, TIM_HandleTypeDef *htim2, TIM_HandleTypeDef *htim3, uint16_t *pz_dma_buffer);
 void Debug_test_print_config();
 void Debug_test_FIR_frequency_sweep(FIR_t *hfir);
 void Debug_test_print_a(volatile a_data_point_t *buffer);
