@@ -77,7 +77,7 @@ HAL_StatusTypeDef ADXL_Init(ADXL_t *hadxl)
 		hadxl->timeout = 100;
 	}
 
-	// Flush SPI
+	// Flush SPI with SCK pulses
 	uint8_t ignore;
 	for (uint8_t i = 0; i < 10; i++)
 	{

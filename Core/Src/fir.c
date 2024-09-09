@@ -14,6 +14,7 @@
 
 HAL_StatusTypeDef FIR_Init(FIR_t *hfir)
 {
+	// Init struct
 #if FIR_REV
 	for (uint16_t i = 0; i < hfir->Nt; i++)
 	{

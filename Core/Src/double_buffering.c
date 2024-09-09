@@ -11,6 +11,18 @@
 
 void Double_Buffer_Init(Double_Buffer_t *hbuffer)
 {
+	if (hbuffer->buffer1 == NULL || hbuffer->buffer2 == NULL)
+	{
+		printf("(%lu) WARNING: Double_Buffer_Init: Null pointer in buffer1/buffer2\r\n", HAL_GetTick());
+	}
+
+	// Provide default values
+	if (hbuffer->element_size == 0)
+	{
+		hbuffer->element_size = 1;
+	}
+
+	// Init struct
 	hbuffer->buffer_current = hbuffer->buffer1;
 	hbuffer->write_index = 0;
 	hbuffer->flag_save_buffer_1 = 0;
@@ -18,11 +30,18 @@ void Double_Buffer_Init(Double_Buffer_t *hbuffer)
 	hbuffer->flag_overflow = 0;
 }
 
+volatile void* Double_Buffer_Current(Double_Buffer_t *hbuffer)
+{
+	return hbuffer->buffer_current + hbuffer->element_size * hbuffer->write_index;
+}
+
 void Double_Buffer_Increment(Double_Buffer_t *hbuffer)
 {
 	// If next index would overflow
 	if (++hbuffer->write_index >= hbuffer->buffer_len)
 	{
+		// Typically save entire buffer
+		hbuffer->save_len = hbuffer->buffer_len;
 		// Switch buffers
 		hbuffer->write_index = 0;
 		// If buffer_2 has been filled
@@ -60,4 +79,17 @@ void Double_Buffer_Increment(Double_Buffer_t *hbuffer)
 			}
 		}
 	}
+}
+
+void Double_Buffer_Flush(Double_Buffer_t *hbuffer)
+{
+	uint32_t flush_len = hbuffer->write_index;
+	if (hbuffer->write_index == 0)
+	{
+		return;
+	}
+	// Increment with write index at end, forcing a buffer save
+	hbuffer->write_index = hbuffer->buffer_len;
+	Double_Buffer_Increment(hbuffer);
+	hbuffer->save_len = flush_len;
 }

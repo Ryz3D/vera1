@@ -11,12 +11,12 @@
 
 HAL_StatusTypeDef SD_Init(Vera_SD_t *hsd, uint8_t do_format)
 {
+	// Init struct
 	hsd->dir_num = 0;
-	hsd->page_num = 1;
+	hsd->page_num = 0;
 	hsd->date_year = 0;
 	hsd->date_month = 0;
 	hsd->date_day = 0;
-	hsd->sd_log_write_index = 0;
 
 	hsd->dir_path[0] = '\0';
 	hsd->a_file_path[0] = '\0';
@@ -120,24 +120,6 @@ HAL_StatusTypeDef SD_UpdateFilepaths(Vera_SD_t *hsd)
 	return HAL_OK;
 }
 
-HAL_StatusTypeDef SD_FlushLog(Vera_SD_t *hsd)
-{
-	if (hsd->sd_log_write_index == 0)
-	{
-		return HAL_OK;
-	}
-
-	// TODO: log file size (reset to 0), log num, new file
-
-	if (SD_WriteBuffer(hsd, hsd->log_file_path, (void*)hsd->sd_log, hsd->sd_log_write_index) != HAL_OK)
-	{
-		return HAL_ERROR;
-	}
-	hsd->sd_log_write_index = 0;
-
-	return HAL_OK;
-}
-
 HAL_StatusTypeDef SD_NewPage(Vera_SD_t *hsd)
 {
 	hsd->page_num++;
@@ -166,7 +148,7 @@ HAL_StatusTypeDef SD_Uninit(Vera_SD_t *hsd)
 
 HAL_StatusTypeDef SD_TouchFile(Vera_SD_t *hsd, TCHAR *path)
 {
-	if (f_open(hsd->fatfs_file, path, FA_CREATE_ALWAYS | FA_WRITE) != FR_OK)
+	if (f_open(hsd->fatfs_file, path, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
 	{
 		return HAL_ERROR;
 	}
@@ -177,7 +159,7 @@ HAL_StatusTypeDef SD_TouchFile(Vera_SD_t *hsd, TCHAR *path)
 
 uint8_t SD_FileExists(Vera_SD_t *hsd, TCHAR *path)
 {
-	if (f_open(hsd->fatfs_file, path, FA_OPEN_EXISTING | FA_READ) != FR_OK)
+	if (f_open(hsd->fatfs_file, path, FA_READ) != FR_OK)
 	{
 		return 0;
 	}
@@ -193,7 +175,7 @@ HAL_StatusTypeDef SD_ReadBuffer(Vera_SD_t *hsd, TCHAR *path, void *data, UINT si
 		return HAL_OK;
 	}
 
-	if (f_open(hsd->fatfs_file, path, FA_OPEN_EXISTING | FA_READ) != FR_OK)
+	if (f_open(hsd->fatfs_file, path, FA_READ) != FR_OK)
 	{
 		printf("(%lu) ERROR: SD_ReadBuffer: SD File \"%s\": file open failed\r\n", HAL_GetTick(), path);
 		return HAL_ERROR;
@@ -223,7 +205,8 @@ HAL_StatusTypeDef SD_WriteBuffer(Vera_SD_t *hsd, TCHAR *path, void *data, UINT s
 		return HAL_OK;
 	}
 
-	if (f_open(hsd->fatfs_file, path, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
+	// Reference: http://elm-chan.org/fsw/ff/doc/open.html
+	if (f_open(hsd->fatfs_file, path, FA_OPEN_APPEND | FA_WRITE | FA_READ) != FR_OK)
 	{
 		printf("(%lu) ERROR: SD_WriteBuffer: SD File \"%s\": file open failed\r\n", HAL_GetTick(), path);
 		return HAL_ERROR;

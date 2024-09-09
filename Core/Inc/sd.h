@@ -25,8 +25,6 @@
 
 #define PATH_LEN 50
 
-#define SD_LOG_LEN 1024
-
 typedef struct
 {
 	GPIO_TypeDef *Detect_GPIO_Port;
@@ -46,10 +44,6 @@ typedef struct
 	TCHAR p_file_path[PATH_LEN];
 	TCHAR log_file_path[PATH_LEN];
 
-	// TODO: better logging
-	char sd_log[SD_LOG_LEN];
-	uint32_t sd_log_write_index;
-
 	a_data_header_t a_header;
 	p_data_header_t p_header;
 } Vera_SD_t;
@@ -57,7 +51,6 @@ typedef struct
 HAL_StatusTypeDef SD_Init(Vera_SD_t *hsd, uint8_t do_format);
 HAL_StatusTypeDef SD_InitDir(Vera_SD_t *hsd);
 HAL_StatusTypeDef SD_UpdateFilepaths(Vera_SD_t *hsd);
-HAL_StatusTypeDef SD_FlushLog(Vera_SD_t *hsd);
 HAL_StatusTypeDef SD_NewPage(Vera_SD_t *hsd);
 HAL_StatusTypeDef SD_Uninit(Vera_SD_t *hsd);
 HAL_StatusTypeDef SD_TouchFile(Vera_SD_t *hsd, TCHAR *path);

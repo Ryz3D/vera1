@@ -98,7 +98,7 @@ extern config_t default_config, config;
 #define DEBUG_TEST_NEVER_FORMAT_SD 0
 #define DEBUG_TEST_FIR_FREQUENCY_SWEEP 0
 #define DEBUG_TEST_FIR_DAC 0
-#define DEBUG_TEST_PRINT_NEW_PAGE 0
+#define DEBUG_TEST_PRINT_NEW_PAGE 1
 #define DEBUG_TEST_FAST_BOOT 0
 
 void Config_Default(void);

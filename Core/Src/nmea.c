@@ -119,6 +119,7 @@ HAL_StatusTypeDef NMEA_RxAckUBX(NMEA_t *hnmea)
 
 HAL_StatusTypeDef NMEA_Init(NMEA_t *hnmea)
 {
+	// Provide default values
 	if (hnmea->tx_timeout == 0)
 	{
 		hnmea->tx_timeout = 1000;
@@ -135,6 +136,8 @@ HAL_StatusTypeDef NMEA_Init(NMEA_t *hnmea)
 	{
 		hnmea->sampling_rate = 10;
 	}
+
+	// Init struct
 	hnmea->rx_buffer_write_index = 0;
 	hnmea->circular_read_index = 0;
 	hnmea->circular_write_index = 0;

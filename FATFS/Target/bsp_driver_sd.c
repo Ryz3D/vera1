@@ -59,9 +59,29 @@ __weak uint8_t BSP_SD_Init(void)
   if (sd_state == MSD_OK)
   {
     /* Enable wide operation */
-    if (HAL_SD_ConfigWideBusOperation(&hsd1, SDMMC_BUS_WIDE_4B) != HAL_OK)
+    HAL_StatusTypeDef status;
+    SD_InitTypeDef Init;
+
+    /* Default SDMMC peripheral configuration for SD card initialization */
+    Init.ClockEdge = SDMMC_CLOCK_EDGE_RISING;
+    Init.ClockBypass = SDMMC_CLOCK_BYPASS_DISABLE;
+    Init.ClockPowerSave = SDMMC_CLOCK_POWER_SAVE_DISABLE;
+    Init.BusWide = SDMMC_BUS_WIDE_1B;
+    Init.HardwareFlowControl = SDMMC_HARDWARE_FLOW_CONTROL_DISABLE;
+    Init.ClockDiv = SDMMC_INIT_CLK_DIV;
+
+    /* Initialize SDMMC peripheral interface with default configuration */
+    status = SDMMC_Init(hsd1.Instance, Init);
+    if (status != HAL_OK)
     {
       sd_state = MSD_ERROR;
+    }
+    else
+    {
+      if (HAL_SD_ConfigWideBusOperation(&hsd1, SDMMC_BUS_WIDE_4B) != HAL_OK)
+      {
+        sd_state = MSD_ERROR;
+      }
     }
   }
 
