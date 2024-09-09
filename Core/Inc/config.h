@@ -75,7 +75,7 @@ extern config_t default_config, config;
 
 // Following defines are called at start and end of a function -> Debug pin is high for entire duration
 // While loop in main function
-#define DEBUG_MAIN_LOOP DEBUG1
+#define DEBUG_MAIN_LOOP ;
 // Saving a_buffer_1 to a file
 #define DEBUG_A_BUFFER_1_SD ;
 // Saving a_buffer_2 to a file
@@ -85,9 +85,9 @@ extern config_t default_config, config;
 // Saving p_buffer_2 to a file
 #define DEBUG_P_BUFFER_2_SD ;
 // Piezo timer interrupt (@ 4 kHz)
-#define DEBUG_A_TIMER ;
+#define DEBUG_A_TIMER DEBUG1
 // Piezo ADC result (@ 4 kHz)
-#define DEBUG_ADC_PZ_CONV ;
+#define DEBUG_ADC_PZ_CONV DEBUG2
 // Processing MEMS data
 #define DEBUG_ADXL_PROCESS ;
 // Processing NMEA char/line

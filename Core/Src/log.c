@@ -23,7 +23,6 @@ void Log_Init(Log_t *hlog)
 	hlog->hbuffer.buffer2 = hlog->buffer2;
 	hlog->hbuffer.buffer_len = LOG_BUFFER_LEN;
 	hlog->hbuffer.element_size = sizeof(char);
-	hlog->current = 0;
 
 	Double_Buffer_Init(&hlog->hbuffer);
 }

@@ -87,11 +87,6 @@ HAL_StatusTypeDef SD_InitDir(Vera_SD_t *hsd)
 		return HAL_ERROR;
 	}
 
-	if (SD_UpdateFilepaths(hsd) != HAL_OK)
-	{
-		return HAL_ERROR;
-	}
-
 	return HAL_OK;
 }
 
