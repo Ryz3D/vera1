@@ -85,20 +85,20 @@ extern config_t default_config, config;
 // Saving p_buffer_2 to a file
 #define DEBUG_P_BUFFER_2_SD ;
 // Piezo timer interrupt (@ 4 kHz)
-#define DEBUG_A_TIMER DEBUG1
+#define DEBUG_A_TIMER ;
 // Piezo ADC result (@ 4 kHz)
-#define DEBUG_ADC_PZ_CONV DEBUG2
+#define DEBUG_ADC_PZ_CONV ;
 // Processing MEMS data
 #define DEBUG_ADXL_PROCESS ;
 // Processing NMEA char/line
 #define DEBUG_NMEA_PROCESS ;
 
-#define DEBUG_TEST_PRINT_CONFIG 1
+#define DEBUG_TEST_NO_CONFIG_LOG 0
 #define DEBUG_TEST_ALWAYS_FORMAT_SD 0
 #define DEBUG_TEST_NEVER_FORMAT_SD 0
 #define DEBUG_TEST_FIR_FREQUENCY_SWEEP 0
 #define DEBUG_TEST_FIR_DAC 0
-#define DEBUG_TEST_PRINT_NEW_PAGE 1
+#define DEBUG_TEST_PRINT_NEW_PAGE 0
 #define DEBUG_TEST_FAST_BOOT 0
 
 void Config_Default(void);
