@@ -1,7 +1,7 @@
 /*
  * nmea.c
  *
- * UART (RS-232) NMEA driver for u-blox 8 (Navilock 62529)
+ * UART (RS-232) NMEA driver for u-blox 8 (Navilock 62528)
  *
  *  Created on: Aug 16, 2024
  *      Author: mirco
@@ -387,8 +387,6 @@ void NMEA_Dec2Hex(uint8_t dec, char *c1, char *c2)
 	}
 }
 
-char temp_buf[1000];
-
 void NMEA_ParsePacket(NMEA_t *hnmea, void *packet_buffer, const char format[])
 {
 	// Skip message header
@@ -451,8 +449,6 @@ void NMEA_ParsePacket(NMEA_t *hnmea, void *packet_buffer, const char format[])
 			if ((uintptr_t)buffer_pointer % sizeof(float) != 0)
 			{
 				buffer_pointer += sizeof(float) - (uintptr_t)buffer_pointer % sizeof(float);
-				// https://stackoverflow.com/questions/4840410/how-to-align-a-pointer-in-c
-				// buffer_pointer = (~(uintptr_t)buffer_pointer + 1) & (sizeof(float) - 1);
 			}
 			if (*line_pointer != ',')
 			{

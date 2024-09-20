@@ -1,7 +1,7 @@
 /*
  * nmea.h
  *
- * UART (RS-232) NMEA driver for u-blox 8 (Navilock 62529)
+ * UART (RS-232) NMEA driver for u-blox 8 (Navilock 62528)
  *
  *  Created on: Aug 16, 2024
  *      Author: mirco

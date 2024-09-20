@@ -87,6 +87,13 @@ HAL_StatusTypeDef SD_InitDir(Vera_SD_t *hsd)
 		return HAL_ERROR;
 	}
 
+	sprintf(hsd->log_file_path, LOG_FILE_FORMAT, hsd->date_year, hsd->date_month, hsd->date_day, hsd->dir_num);
+	if (SD_TouchFile(hsd, hsd->log_file_path) != HAL_OK)
+	{
+		printf("(%lu) ERROR: SD_Init: Log file (\"%s\") touch failed\r\n", HAL_GetTick(), hsd->log_file_path);
+		return HAL_ERROR;
+	}
+
 	return HAL_OK;
 }
 
@@ -94,7 +101,6 @@ HAL_StatusTypeDef SD_UpdateFilepaths(Vera_SD_t *hsd)
 {
 	sprintf(hsd->a_file_path, A_FILE_FORMAT, hsd->date_year, hsd->date_month, hsd->date_day, hsd->dir_num, hsd->page_num);
 	sprintf(hsd->p_file_path, P_FILE_FORMAT, hsd->date_year, hsd->date_month, hsd->date_day, hsd->dir_num, hsd->page_num);
-	sprintf(hsd->log_file_path, LOG_FILE_FORMAT, hsd->date_year, hsd->date_month, hsd->date_day, hsd->dir_num);
 
 	if (SD_TouchFile(hsd, hsd->a_file_path) != HAL_OK)
 	{
@@ -104,11 +110,6 @@ HAL_StatusTypeDef SD_UpdateFilepaths(Vera_SD_t *hsd)
 	if (SD_TouchFile(hsd, hsd->p_file_path) != HAL_OK)
 	{
 		printf("(%lu) ERROR: SD_UpdateFilepaths: Pos. file (\"%s\") touch failed\r\n", HAL_GetTick(), hsd->p_file_path);
-		return HAL_ERROR;
-	}
-	if (SD_TouchFile(hsd, hsd->log_file_path) != HAL_OK)
-	{
-		printf("(%lu) ERROR: SD_UpdateFilepaths: Log file (\"%s\") touch failed\r\n", HAL_GetTick(), hsd->log_file_path);
 		return HAL_ERROR;
 	}
 

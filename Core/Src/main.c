@@ -78,7 +78,7 @@ DMA_HandleTypeDef hdma_usart1_rx;
 Log_t hlog; // Logger
 Vera_SD_t hvsd1; // SD card
 ADXL_t hadxl; // MEMS sensor ADXL-357
-NMEA_t hnmea; // GNSS module Navilock 62529
+NMEA_t hnmea; // GNSS module Navilock 62528
 FIR_t hfir_pz[PIEZO_COUNT_MAX]; // FIR filters for ADC channels
 Double_Buffer_t hbuffer_a, hbuffer_p; // Manages double buffering flags for acceleration and position buffers
 
@@ -1246,10 +1246,10 @@ void Main_NMEA_Loop()
 		if (any_valid)
 		{
 			time_p_last = HAL_GetTick();
-			// If timer to increment is not running yet
+			// If timer for incrementing the data point index is not running yet
 			if (time_p_inc == 0)
 			{
-				// Start timer
+				// Start the timer
 				time_p_inc = HAL_GetTick() + NMEA_PACKET_MERGE_DURATION;
 			}
 			// If the timer was running, the data was merged into the same p_data_point_t and the timer keeps running
